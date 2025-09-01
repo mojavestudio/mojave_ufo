@@ -4,11 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Spline Scene</title>
-    <!-- Load the Spline Viewer web component (guard duplicate define) -->
+    <!-- Load the Spline Viewer web component (idempotent loader) -->
     <script type="module">
-      if (!customElements.get('spline-viewer')) {
-        import('https://unpkg.com/@splinetool/viewer@1.10.53/build/spline-viewer.js');
-      }
+      import { loadSplineViewer } from './spline-loader.js';
+      // If another runtime already put THREE on window, we reuse it by not
+      // importing any additional THREE here. The viewer bundles its own.
+      loadSplineViewer('1.10.53').catch(console.error);
     </script>
     <style>
       html, body { margin: 0; height: 100%; }
