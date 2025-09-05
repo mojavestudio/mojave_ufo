@@ -2,171 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Mojave UFO</title>
 
-    <!-- Preload scene so the first load is snappier -->
-    <link rel="preload" href="./scene.splinecode" as="fetch" />
+    <!-- Load Spline viewer web component -->
+    <script type="module" src="https://unpkg.com/@splinetool/viewer@1.10.53/build/spline-viewer.js"></script>
 
     <style>
-      html, body { margin: 0; height: 100%; background: #000; }
-      /* Width-driven, ratio-based box to avoid mobile 100vh jumpiness */
-      #box {
-        position: relative;
-        width: 100vw;
-        aspect-ratio: 1200 / 700; /* height = width / (1200/700) */
-        max-height: 100dvh;
-        background: #000;
-        overflow: hidden;
-      }
-      /* Fallback for browsers without dvh support */
-      @supports not (height: 100dvh) {
-        #box { max-height: 100vh; }
-      }
-      canvas {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        display: block;
-      }
-      /* Optional: poster overlay for instant first paint (replace poster.png) */
-      #poster {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        pointer-events: none;
-        transition: opacity 160ms ease;
-      }
-      /* Optional tiny debug overlay (tap to toggle) */
-      #debug { position: fixed; left: 8px; bottom: 8px; background: rgba(0,0,0,0.6); color: #0f0; font: 12px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 6px 8px; border-radius: 6px; z-index: 9999; user-select: none; }
+      html, body { height: 100%; margin: 0; }
+      /* Full-viewport wrapper (no space in 100vh) */
+      #wrap { height: 100vh; width: 100vw; }
+      spline-viewer { width: 100%; height: 100%; display: block; }
     </style>
   </head>
   <body>
-    <div id="box">
-      <canvas id="canvas" aria-label="Spline" role="img"></canvas>
-      <!-- Replace with a real exported poster matching frame 0 -->
-      <img id="poster" src="./poster.png" alt="" />
+    <div id="wrap">
+      <!-- Local scene + local Spline runtime files in the same folder -->
+      <spline-viewer url="./scene.splinecode"></spline-viewer>
     </div>
-    <div id="debug" hidden>—</div>
-
-    <script>
-      (function () {
-        // Bump this when you replace Spline files to bust GH Pages cache
-        const VER = "2025-09-05-03"
-        const box = document.getElementById('box')
-        const canvas = document.getElementById('canvas')
-        const poster = document.getElementById('poster')
-        const debug = document.getElementById('debug')
-
-        const SCENE_URL = './scene.splinecode'
-
-        function withVer(url) {
-          if (!VER) return url
-          return url + (url.includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(VER)
-        }
-
-        let loaded = false
-        function setDebug(text) {
-          if (!debug) return
-          debug.hidden = false
-          debug.textContent = text
-        }
-
-        let app = null
-        let loading = false
-        let loadToken = 0
-
-        function ensureCanvasSize() {
-          if (!box || !canvas) return { w: 0, h: 0 }
-          const w = Math.max(1, Math.round(box.clientWidth))
-          const h = Math.max(1, Math.round(box.clientHeight))
-          const dpr = Math.min(window.devicePixelRatio || 1, 1.5)
-          canvas.style.width = w + 'px'
-          canvas.style.height = h + 'px'
-          canvas.width = Math.round(w * dpr)
-          canvas.height = Math.round(h * dpr)
-          if (app && app.setSize) try { app.setSize(w, h) } catch (_) {}
-          return { w, h }
-        }
-
-        function showError(message) {
-          if (!debug) return
-          debug.hidden = false
-          debug.style.color = '#f66'
-          debug.textContent = message
-        }
-
-        async function tryLoad(url) {
-          const u = withVer(url)
-          try {
-            await app.load(u)
-            return true
-          } catch (e) {
-            return false
-          }
-        }
-
-        async function initialLoad() {
-          if (!box || !canvas || !app) return
-          const { w } = ensureCanvasSize()
-          setDebug(`${Math.round(w)}px → ${SCENE_URL}`)
-          const ok = await tryLoad(SCENE_URL)
-          if (!ok) {
-            showError('Failed to load Spline scene')
-            return
-          }
-          try {
-            app.stop?.(); app.setTime?.(0)
-            const objs = app.getAllObjects?.() || []
-            for (const o of objs) if ('state' in o) (o).state = undefined
-          } catch {}
-          await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
-          hidePosterSoon()
-          try { app.play?.() } catch {}
-          loaded = true
-        }
-
-        // Fade poster after first paint from the viewer (best-effort)
-        function hidePosterSoon() {
-          if (!poster) return
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              poster.style.opacity = '0'
-              setTimeout(() => { try { poster.remove() } catch (_) {} }, 220)
-            })
-          })
-        }
-
-        // Toggle debug overlay on tap/click
-        if (debug) {
-          debug.addEventListener('click', () => {
-            debug.hidden = !debug.hidden
-          })
-        }
-
-        // Initial load
-        (async () => {
-          // Dynamically import runtime to avoid blocking initial paint
-          const mod = await import('https://unpkg.com/@splinetool/runtime@1.10.56/build/runtime.js')
-          const { Application } = mod
-          if (!canvas) return
-          app = new Application(canvas)
-          ensureCanvasSize()
-          await initialLoad()
-        })()
-
-        // Resize updates canvas and runtime size only (no reloads)
-        if ('ResizeObserver' in window && box) {
-          const ro = new ResizeObserver(() => { ensureCanvasSize() })
-          ro.observe(box)
-        } else {
-          window.addEventListener('resize', ensureCanvasSize)
-          window.addEventListener('orientationchange', ensureCanvasSize)
-        }
-      })()
-    </script>
   </body>
   </html>
