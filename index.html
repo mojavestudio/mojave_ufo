@@ -48,8 +48,6 @@
   </head>
   <body>
     <div id="box">
-      <!-- The viewer's URL will be set based on container width -->
-      <spline-viewer id="viewer"></spline-viewer>
       <!-- Replace with a real exported poster matching frame 0 -->
       <img id="poster" src="./poster.png" alt="" />
     </div>
@@ -66,12 +64,26 @@
         }
 
         let current = ''
+        function mountViewer(url) {
+          if (!box) return
+          const old = document.getElementById('viewer')
+          const el = document.createElement('spline-viewer')
+          el.setAttribute('id', 'viewer')
+          el.setAttribute('url', url)
+          // Insert below poster so poster stays on top until we fade it
+          box.insertBefore(el, poster || null)
+          if (old && old !== el) try { old.remove() } catch (_) {}
+
+          // Best-effort poster fade after the element has a couple paint cycles
+          hidePosterSoon()
+        }
+
         function updateUrl() {
-          const w = box?.clientWidth || window.innerWidth || 1024
+          const w = (box && box.clientWidth) || window.innerWidth || 1024
           const next = chooseUrl(w)
           if (next !== current) {
             current = next
-            viewer?.setAttribute('url', next)
+            mountViewer(next)
           }
         }
 
@@ -85,9 +97,6 @@
             })
           })
         }
-
-        // In practice, the Framer component handles timing precisely; this is a light preview
-        viewer?.addEventListener('load', hidePosterSoon, { once: true })
 
         // Initial selection and responsive switching at breakpoint
         updateUrl()
