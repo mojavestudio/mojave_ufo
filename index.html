@@ -5,12 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Mojave UFO</title>
 
-    <!-- Load Spline viewer web component -->
-    <script type="module" src="https://unpkg.com/@splinetool/viewer@1.10.53/build/spline-viewer.js"></script>
-
     <!-- Preload both variants so the chosen one appears faster (non-blocking) -->
     <link rel="preload" href="./scene-desktop.splinecode" as="fetch" />
     <link rel="preload" href="./scene-mobile.splinecode" as="fetch" />
+    <link rel="preload" href="./scene.splinecode" as="fetch" />
 
     <style>
       html, body { margin: 0; height: 100%; background: #000; }
@@ -27,7 +25,7 @@
       @supports not (height: 100dvh) {
         #box { max-height: 100vh; }
       }
-      spline-viewer {
+      canvas {
         position: absolute;
         inset: 0;
         width: 100%;
@@ -61,6 +59,7 @@
   </head>
   <body>
     <div id="box">
+      <canvas id="canvas" aria-label="Spline" role="img"></canvas>
       <!-- Replace with a real exported poster matching frame 0 -->
       <img id="poster" src="./poster.png" alt="" />
     </div>
@@ -70,8 +69,9 @@
       (function () {
         const MOBILE_BP = 768
         // Bump this when you replace Spline files to bust GH Pages cache
-        const VER = "2025-09-05-01"
+        const VER = "2025-09-05-02"
         const box = document.getElementById('box')
+        const canvas = document.getElementById('canvas')
         const poster = document.getElementById('poster')
         const debug = document.getElementById('debug')
 
@@ -92,47 +92,72 @@
           debug.textContent = text
         }
 
-        function mountViewer(url) {
-          if (!box) return
-          const old = document.getElementById('viewer')
-          const el = document.createElement('spline-viewer')
-          el.setAttribute('id', 'viewer')
-          el.setAttribute('url', withVer(url))
-          el.addEventListener('load', () => hidePosterSoon(), { once: true })
-          // Insert below poster so poster stays on top until we fade it
-          box.insertBefore(el, poster || null)
-          if (old && old !== el) try { old.remove() } catch (_) {}
+        let app = null
+        let loading = false
+        let loadToken = 0
 
-          // Best-effort poster fade after the element has a couple paint cycles
-          hidePosterSoon()
+        function ensureCanvasSize() {
+          if (!box || !canvas) return { w: 0, h: 0 }
+          const w = Math.max(1, Math.round(box.clientWidth))
+          const h = Math.max(1, Math.round(box.clientHeight))
+          const dpr = Math.min(window.devicePixelRatio || 1, 1.5)
+          canvas.style.width = w + 'px'
+          canvas.style.height = h + 'px'
+          canvas.width = Math.round(w * dpr)
+          canvas.height = Math.round(h * dpr)
+          if (app && app.setSize) try { app.setSize(w, h) } catch (_) {}
+          return { w, h }
         }
 
-        async function urlExists(url) {
+        function showError(message) {
+          if (!debug) return
+          debug.hidden = false
+          debug.style.color = '#f66'
+          debug.textContent = message
+        }
+
+        async function tryLoad(url) {
+          const u = withVer(url)
           try {
-            const res = await fetch(withVer(url), { method: 'HEAD' })
-            return res.ok
-          } catch {
+            await app.load(u)
+            return true
+          } catch (e) {
             return false
           }
         }
 
-        async function resolveUrlForWidth(w) {
+        async function resolveAndLoadForWidth(w) {
           const preferred = chooseUrl(w)
-          if (await urlExists(preferred)) return preferred
-          const fallback = './scene.splinecode'
-          if (preferred !== fallback && await urlExists(fallback)) return fallback
-          return preferred // let the network error surface if nothing exists
+          const currentId = ++loadToken
+          loading = true
+          setDebug(`${Math.round(w)}px → ${preferred}`)
+          let ok = await tryLoad(preferred)
+          if (currentId !== loadToken) return // superseded
+          if (!ok) {
+            setDebug(`${Math.round(w)}px → fallback ./scene.splinecode`)
+            ok = await tryLoad('./scene.splinecode')
+          }
+          if (currentId !== loadToken) return // superseded
+          if (!ok) showError('Failed to load Spline scene')
+          // Lock to base frame before revealing
+          try {
+            app.stop?.()
+            app.setTime?.(0)
+          } catch (_) {}
+          // Wait a couple RAFs to ensure first paint
+          await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+          hidePosterSoon()
+          try { app.play?.() } catch (_) {}
+          loading = false
         }
 
         async function updateUrl() {
-          const w = (box && box.clientWidth) || window.innerWidth || 1024
-          const myId = ++mountId
-          const next = await resolveUrlForWidth(w)
-          if (myId !== mountId) return // superseded by a newer resize
-          if (next !== current) {
+          if (!box || !canvas) return
+          const { w } = ensureCanvasSize()
+          const next = chooseUrl(w)
+          if (next !== current || !app) {
             current = next
-            setDebug(`${Math.round(w)}px → ${next}`)
-            mountViewer(next)
+            await resolveAndLoadForWidth(w)
           }
         }
 
@@ -155,7 +180,16 @@
         }
 
         // Initial selection and responsive switching at breakpoint
-        updateUrl()
+        (async () => {
+          // Dynamically import runtime to avoid blocking initial paint
+          const mod = await import('https://unpkg.com/@splinetool/runtime@1.10.56/build/runtime.js')
+          const { Application } = mod
+          if (!canvas) return
+          app = new Application(canvas)
+          ensureCanvasSize()
+          await updateUrl()
+        })()
+
         if ('ResizeObserver' in window && box) {
           const ro = new ResizeObserver(() => { updateUrl() })
           ro.observe(box)
