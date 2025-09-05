@@ -8,9 +8,9 @@
     <!-- Load Spline viewer web component -->
     <script type="module" src="https://unpkg.com/@splinetool/viewer@1.10.53/build/spline-viewer.js"></script>
 
-    <!-- Preload both variants so the chosen one appears faster -->
-    <link rel="preload" href="./scene-desktop.splinecode" as="fetch" crossorigin="anonymous" />
-    <link rel="preload" href="./scene-mobile.splinecode" as="fetch" crossorigin="anonymous" />
+    <!-- Preload both variants so the chosen one appears faster (non-blocking) -->
+    <link rel="preload" href="./scene-desktop.splinecode" as="fetch" />
+    <link rel="preload" href="./scene-mobile.splinecode" as="fetch" />
 
     <style>
       html, body { margin: 0; height: 100%; background: #000; }
@@ -44,6 +44,19 @@
         pointer-events: none;
         transition: opacity 160ms ease;
       }
+      /* Tiny debug overlay (tap to toggle) */
+      #debug {
+        position: fixed;
+        left: 8px;
+        bottom: 8px;
+        background: rgba(0,0,0,0.6);
+        color: #0f0;
+        font: 12px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        padding: 6px 8px;
+        border-radius: 6px;
+        z-index: 9999;
+        user-select: none;
+      }
     </style>
   </head>
   <body>
@@ -51,25 +64,41 @@
       <!-- Replace with a real exported poster matching frame 0 -->
       <img id="poster" src="./poster.png" alt="" />
     </div>
+    <div id="debug" hidden>—</div>
 
     <script>
       (function () {
         const MOBILE_BP = 768
+        // Bump this when you replace Spline files to bust GH Pages cache
+        const VER = "2025-09-05-01"
         const box = document.getElementById('box')
-        const viewer = document.getElementById('viewer')
         const poster = document.getElementById('poster')
+        const debug = document.getElementById('debug')
 
         function chooseUrl(width) {
           return width <= MOBILE_BP ? './scene-mobile.splinecode' : './scene-desktop.splinecode'
         }
 
+        function withVer(url) {
+          if (!VER) return url
+          return url + (url.includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(VER)
+        }
+
         let current = ''
+        let mountId = 0
+        function setDebug(text) {
+          if (!debug) return
+          debug.hidden = false
+          debug.textContent = text
+        }
+
         function mountViewer(url) {
           if (!box) return
           const old = document.getElementById('viewer')
           const el = document.createElement('spline-viewer')
           el.setAttribute('id', 'viewer')
-          el.setAttribute('url', url)
+          el.setAttribute('url', withVer(url))
+          el.addEventListener('load', () => hidePosterSoon(), { once: true })
           // Insert below poster so poster stays on top until we fade it
           box.insertBefore(el, poster || null)
           if (old && old !== el) try { old.remove() } catch (_) {}
@@ -78,11 +107,31 @@
           hidePosterSoon()
         }
 
-        function updateUrl() {
+        async function urlExists(url) {
+          try {
+            const res = await fetch(withVer(url), { method: 'HEAD' })
+            return res.ok
+          } catch {
+            return false
+          }
+        }
+
+        async function resolveUrlForWidth(w) {
+          const preferred = chooseUrl(w)
+          if (await urlExists(preferred)) return preferred
+          const fallback = './scene.splinecode'
+          if (preferred !== fallback && await urlExists(fallback)) return fallback
+          return preferred // let the network error surface if nothing exists
+        }
+
+        async function updateUrl() {
           const w = (box && box.clientWidth) || window.innerWidth || 1024
-          const next = chooseUrl(w)
+          const myId = ++mountId
+          const next = await resolveUrlForWidth(w)
+          if (myId !== mountId) return // superseded by a newer resize
           if (next !== current) {
             current = next
+            setDebug(`${Math.round(w)}px → ${next}`)
             mountViewer(next)
           }
         }
@@ -98,10 +147,17 @@
           })
         }
 
+        // Toggle debug overlay on tap/click
+        if (debug) {
+          debug.addEventListener('click', () => {
+            debug.hidden = !debug.hidden
+          })
+        }
+
         // Initial selection and responsive switching at breakpoint
         updateUrl()
         if ('ResizeObserver' in window && box) {
-          const ro = new ResizeObserver(() => updateUrl())
+          const ro = new ResizeObserver(() => { updateUrl() })
           ro.observe(box)
         } else {
           window.addEventListener('resize', updateUrl)
