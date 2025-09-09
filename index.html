@@ -4,26 +4,36 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Mojave UFO</title>
+    <link rel="preload" as="image" href="./poster.png" />
     <style>
       html, body { height: 100%; margin: 0; background: #000; }
-      /* Keep a definite size to avoid zero-size WebGL targets */
-      spline-viewer { display: block; width: 100vw; height: 100vh; background: #000; }
+      #wrap { position: relative; width: 100vw; height: 100vh; overflow: hidden; background: #000; }
+      #poster { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+      spline-viewer { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+      .hidden { display: none !important; }
     </style>
     <!-- Import ONLY the Spline viewer (no standalone Three.js) -->
     <script type="module" src="https://unpkg.com/@splinetool/viewer@1.10.56/build/spline-viewer.js"></script>
   </head>
   <body>
-    <spline-viewer
-      id="sv"
-      url="./scene.splinecode"
-      loading-anim="true"
-      events-target="local"
-      aria-label="Spline scene"
-    ></spline-viewer>
+    <div id="wrap">
+      <img id="poster" src="./poster.png" alt="Mojave UFO" />
+      <spline-viewer
+        id="sv"
+        url="./scene.splinecode"
+        loading-anim="true"
+        events-target="local"
+        aria-label="Spline scene"
+      ></spline-viewer>
+    </div>
 
     <script type="module">
-      // Handle context loss/restoration gracefully
+      // Handle context loss/restoration gracefully + poster hide
       const sv = document.getElementById('sv')
+      const poster = document.getElementById('poster')
+      const hidePoster = () => poster && poster.classList.add('hidden')
+      sv?.addEventListener('load', hidePoster)
+      setTimeout(hidePoster, 4000)
       sv?.addEventListener('context-loss', () => {
         const u = sv.getAttribute('url')
         sv.setAttribute('url', '')
@@ -32,4 +42,3 @@
     </script>
   </body>
   </html>
-
