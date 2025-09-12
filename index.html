@@ -13,8 +13,8 @@
       spline-viewer { position: absolute; inset: 0; display: block; width: 100% !important; height: 100% !important; background: transparent !important; }
       .hidden { display: none !important; }
     </style>
-    <!-- Import ONLY the Spline viewer (no standalone Three.js) -->
-    <script type="module" src="https://unpkg.com/@splinetool/viewer@1.10.57/build/spline-viewer.js"></script>
+    <!-- Import Spline viewer from local, pinned vendor build -->
+    <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
   </head>
   <body>
     <div id="wrap">
@@ -65,6 +65,32 @@
         const u = sv.getAttribute('url')
         sv.setAttribute('url', '')
         requestAnimationFrame(() => sv.setAttribute('url', u))
+      })
+
+      // --- Parent scroll bridge (Framer) ---
+      // Expect messages: { type: 'FRAMER_SCROLL', t: 0..1 }
+      // Optional init:  { type: 'FRAMER_SCROLL_INIT' }
+      let scrollMode = false
+      const clamp01 = (v) => Math.max(0, Math.min(1, v))
+      const scrubTo = (t) => {
+        const dur = Number(sv?.duration || 1)
+        try { sv.pause?.() } catch {}
+        try { sv.setTime?.(clamp01(t) * dur) } catch {}
+        try { sv.render?.() } catch {}
+      }
+
+      addEventListener('message', (e) => {
+        if (!e?.data || typeof e.data !== 'object') return
+        const { type, t } = e.data
+        if (type === 'FRAMER_SCROLL_INIT') {
+          scrollMode = true
+          try { sv.pause?.() } catch {}
+          return
+        }
+        if (type === 'FRAMER_SCROLL') {
+          scrollMode = true
+          scrubTo(Number.isFinite(t) ? t : 0)
+        }
       })
     </script>
   </body>

@@ -8,6 +8,7 @@ Keep these files at the repo root:
 - `process.js`
 - `process.wasm`
 - `.nojekyll`
+- Vendored viewer: `vendor/spline-viewer/build/*` (pinned)
 
 ## GitHub Pages + Framer Embed
 
@@ -29,11 +30,11 @@ This repo can also serve a standalone Spline scene via GitHub Pages and be embed
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Spline Scene</title>
-    <!-- Load the Spline Viewer web component -->
-    <script type="module" src="https://unpkg.com/@splinetool/viewer@1.10.53/build/spline-viewer.js"></script>
+    <!-- Load the Spline Viewer web component (self-hosted, pinned) -->
+    <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
     <style>
-      html, body { margin: 0; height: 100%; }
-      #wrap { height: 100vh; }
+      html, body { margin: 0; height: 100%; background: transparent; }
+      #wrap { position: absolute; inset: 0; }
     </style>
   </head>
   <body>
@@ -133,3 +134,17 @@ npx serve -p 3000 .
 - Wait 1–2 minutes, then open:
   - `https://<username>.github.io/<repo>/`
   - `https://<username>.github.io/<repo>/scene.splinecode`
+
+## Pinned Viewer (self-hosted)
+
+This repo vendors the Spline Viewer so everything serves from GitHub Pages without hitting a CDN. The currently pinned version is `1.10.57` under `vendor/spline-viewer/build`.
+
+- Update the pinned version:
+
+```bash
+./scripts/update_spline_viewer.sh 1.10.57
+```
+
+Notes:
+- The viewer’s `process.js` looks for `process.wasm` in the same folder. Some published versions don’t include it under `/build`. The script falls back to copying the local `./process.wasm` into `vendor/spline-viewer/build/`.
+- `index.html` already points to `./vendor/spline-viewer/build/spline-viewer.js`.
