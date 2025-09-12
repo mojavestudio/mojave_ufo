@@ -9,66 +9,43 @@
   <script type="module" src="https://unpkg.com/@splinetool/viewer@1.10.57/build/spline-viewer.js"></script>
 
   <style>
-    html, body { height: 100%; margin: 0; background: transparent; }
-    /* Scroll is enabled on body so Spline Scroll Events can react */
-    body { overflow: auto; scrollbar-width: none; }
-    body::-webkit-scrollbar { display: none; }
-
-    /* Keep the viewer visible immediately and pinned during scroll */
-    #wrap { position: sticky; top: 0; height: 100vh; }
+    /* Full-bleed viewer, no internal scroll (let parent page control scroll) */
+    html, body { height: 100%; margin: 0; background: transparent; overflow: hidden; }
+    #wrap { position: fixed; inset: 0; }
     spline-viewer, canvas { width: 100% !important; height: 100% !important; display: block; background: transparent !important; }
-
-    /* Add scroll range AFTER the viewer so it’s visible at the top */
-    #scroller { height: 4000px; pointer-events: none; }
-
-    /* Tiny debug label (optional) */
-    #dbg { position: fixed; left: 8px; bottom: 8px; padding: 6px 8px; font: 12px system-ui; color: #fff; background: #0008; border-radius: 6px; }
   </style>
 </head>
 <body>
   <div id="wrap">
     <spline-viewer id="sv" url="./scene.splinecode" events-target="window" loading-anim="true"></spline-viewer>
   </div>
-  <!-- Scroller comes after so the viewer is not buried below -->
-  <div id="scroller" aria-hidden="true"></div>
-  <div id="dbg">waiting…</div>
 
   <script>
     (function () {
       const sv = document.getElementById('sv');
-      const dbg = (t) => { const d = document.getElementById('dbg'); if (d) d.textContent = t; };
 
       // Play when loaded; ensure t=0 for a clean first frame
       sv?.addEventListener?.('load-complete', () => {
         try { sv.play?.(); sv.setTime?.(0); } catch {}
-        dbg('loaded');
       });
 
-      // Receive parent scroll messages
-      let scrubbing = false;
+      // Receive parent scroll messages: scrub timeline only (no internal scrolling)
       addEventListener('message', (e) => {
         const d = e?.data || {};
         if (d.type === 'FRAMER_SCROLL_INIT') {
-          scrubbing = true;
           try { sv.pause?.(); sv.setTime?.(0); } catch {}
-          dbg('init');
           return;
         }
         if (d.type === 'FRAMER_SCROLL') {
-          scrubbing = true;
           const t = Math.max(0, Math.min(1, Number(d.t) || 0));
-          dbg(`t=${t.toFixed(3)}`);
-          // A) Scrub timeline (works if your scene uses a timeline)
           try { const dur = Number(sv?.duration || 1); sv.setTime?.(t * dur); sv.play?.(); } catch {}
-          // B) Also emulate page scroll so Spline Scroll Events fire
-          try { const max = Math.max(1, document.documentElement.scrollHeight - innerHeight); scrollTo(0, t * max); } catch {}
         }
       });
 
       // Safety: if viewer never registers, script didn’t load
       setTimeout(() => {
         if (!customElements.get('spline-viewer')) {
-          dbg('viewer not registered — check <script src> or CSP');
+          console.warn('spline-viewer not registered — check <script src> or CSP');
         }
       }, 4000);
     })();
