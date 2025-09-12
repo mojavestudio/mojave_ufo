@@ -13,8 +13,24 @@
       spline-viewer { position: absolute; inset: 0; display: block; width: 100% !important; height: 100% !important; background: transparent !important; }
       .hidden { display: none !important; }
     </style>
-    <!-- Import Spline viewer from local, pinned vendor build -->
-    <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
+    <!-- Load Spline viewer: try local vendor, fallback to CDN if not found -->
+    <script type="module">
+      const LOCAL = './vendor/spline-viewer/build/spline-viewer.js'
+      const CDN = 'https://unpkg.com/@splinetool/viewer@1.10.57/build/spline-viewer.js'
+      const isRegistered = () => !!customElements.get('spline-viewer')
+      const tryImport = async (src) => {
+        try { await import(src); return true } catch (e) {
+          console.warn('[Spline] Failed to load', src, e); return false
+        }
+      }
+      (async () => {
+        let ok = await tryImport(LOCAL)
+        // Give the registry a tick to settle
+        if (!ok || !isRegistered()) ok = await tryImport(CDN)
+        if (!isRegistered()) console.error('[Spline] viewer not registered. Check script paths.')
+        else window.__SplineViewerLoaded = true
+      })()
+    </script>
   </head>
   <body>
     <div id="wrap">
