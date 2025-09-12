@@ -9,47 +9,94 @@
   <script type="module" src="https://unpkg.com/@splinetool/viewer@1.10.57/build/spline-viewer.js"></script>
 
   <style>
-    /* Full-bleed viewer; child won't capture scroll (parent controls scroll) */
-    html, body { height: 100%; margin: 0; background: transparent; overflow: hidden; }
+    /* Full-bleed viewer. By default the child won't capture scroll (parent controls it). */
+    html, body { height: 100%; margin: 0; background: transparent; }
+    body { overflow: hidden; }
     #wrap { position: fixed; inset: 0; }
     spline-viewer, canvas { width: 100% !important; height: 100% !important; display: block; background: transparent !important; }
+
+    /* Internal scroll fallback (enabled dynamically if no parent messages arrive) */
+    html.internal body { overflow: auto; scrollbar-width: none; }
+    html.internal body::-webkit-scrollbar { display: none; }
+    html.internal #wrap { position: sticky; top: 0; height: 100vh; }
   </style>
 </head>
 <body>
   <div id="wrap">
     <spline-viewer id="sv" url="./scene.splinecode" events-target="window" loading-anim="true"></spline-viewer>
   </div>
-  <!-- Invisible scroller to provide scrollHeight for Spline Scroll Events (no user scroll) -->
-  <div id="ghost-scroll" style="height:4000px; visibility:hidden; pointer-events:none;"></div>
+  <!-- Invisible scroller to provide scrollHeight for Spline Scroll Events -->
+  <div id="ghost-scroll" style="height:4000px; visibility:hidden; pointer-events:none; display:none;"></div>
 
   <script>
     (function () {
       const sv = document.getElementById('sv');
+      const ghost = document.getElementById('ghost-scroll');
+      const htmlEl = document.documentElement;
+
+      // Query param overrides
+      const params = new URLSearchParams(location.search);
+      const forceInternal = params.get('internal') === '1';
+      const forceExternal = params.get('external') === '1';
+
+      let internal = !!forceInternal;
+      let gotParentMsg = false;
+      let fallbackTimer = 0;
+
+      function activateInternal() {
+        if (internal) return;
+        internal = true;
+        htmlEl.classList.add('internal');
+        if (ghost) ghost.style.display = 'block';
+        // Drive timeline from this page's own scroll, so both modes behave similarly
+        const computeT = () => {
+          const max = Math.max(1, document.documentElement.scrollHeight - innerHeight);
+          return Math.max(0, Math.min(1, scrollY / max));
+        };
+        const onScroll = () => {
+          const t = computeT();
+          try { const dur = Number(sv?.duration || 1); sv.setTime?.(t * dur); sv.play?.(); } catch {}
+        };
+        addEventListener('scroll', onScroll, { passive: true });
+        onScroll();
+      }
 
       // Play when loaded; ensure t=0 for a clean first frame
       sv?.addEventListener?.('load-complete', () => {
         try { sv.play?.(); sv.setTime?.(0); } catch {}
       });
 
-      // Receive parent scroll messages: scrub timeline and emulate child scroll (no user scroll)
+      // If not forced external/internal, choose based on whether parent sends messages soon
+      if (!forceInternal && !forceExternal) {
+        fallbackTimer = window.setTimeout(() => {
+          if (!gotParentMsg) activateInternal();
+        }, 900);
+      }
+      if (forceInternal) activateInternal();
+
+      // Receive parent scroll messages
       addEventListener('message', (e) => {
         const d = e?.data || {};
+        if (d.type === 'FRAMER_SCROLL_INIT' || d.type === 'FRAMER_SCROLL') {
+          gotParentMsg = true;
+          if (fallbackTimer) { window.clearTimeout(fallbackTimer); fallbackTimer = 0; }
+          // Ensure external mode if parent is driving
+          if (!forceInternal && internal) { internal = false; htmlEl.classList.remove('internal'); if (ghost) ghost.style.display = 'block'; }
+        }
         if (d.type === 'FRAMER_SCROLL_INIT') {
           try { sv.pause?.(); sv.setTime?.(0); } catch {}
           return;
         }
         if (d.type === 'FRAMER_SCROLL') {
           const t = Math.max(0, Math.min(1, Number(d.t) || 0));
-          try {
-            const dur = Number(sv?.duration || 1);
-            sv.setTime?.(t * dur);
-            sv.play?.();
-          } catch {}
-          // Emulate internal scroll so Spline Scroll Events fire, without stealing page scroll
-          try {
-            const max = Math.max(1, document.documentElement.scrollHeight - innerHeight);
-            scrollTo(0, t * max);
-          } catch {}
+          try { const dur = Number(sv?.duration || 1); sv.setTime?.(t * dur); sv.play?.(); } catch {}
+          // Only emulate internal scroll while in external mode (so Scroll Events fire)
+          if (!internal) {
+            try {
+              const max = Math.max(1, document.documentElement.scrollHeight - innerHeight);
+              scrollTo(0, t * max);
+            } catch {}
+          }
         }
       });
 
