@@ -12,3 +12,8 @@ node_modules/
 dist/
 build/
 
+# Keep vendored Spline viewer build despite the global build/ ignore
+!vendor/
+!vendor/spline-viewer/
+!vendor/spline-viewer/build/
+!vendor/spline-viewer/build/**
