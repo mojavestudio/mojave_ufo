@@ -11,13 +11,13 @@
   <style>
     /* Full-bleed viewer. By default the child won't capture scroll (parent controls it). */
     html, body { height: 100%; margin: 0; background: transparent; }
-    body { overflow: hidden; }
+    /* Allow programmatic scroll; hide scrollbar so the child doesn't feel scrollable */
+    body { overflow: auto; scrollbar-width: none; }
+    body::-webkit-scrollbar { display: none; }
     #wrap { position: fixed; inset: 0; }
     spline-viewer, canvas { width: 100% !important; height: 100% !important; display: block; background: transparent !important; }
 
     /* Internal scroll fallback (enabled dynamically if no parent messages arrive) */
-    html.internal body { overflow: auto; scrollbar-width: none; }
-    html.internal body::-webkit-scrollbar { display: none; }
     html.internal #wrap { position: sticky; top: 0; height: 100vh; }
   </style>
 </head>
@@ -33,6 +33,7 @@
       const sv = document.getElementById('sv');
       const ghost = document.getElementById('ghost-scroll');
       const htmlEl = document.documentElement;
+      const root = document.scrollingElement || document.documentElement;
 
       // Query param overrides
       const params = new URLSearchParams(location.search);
@@ -43,6 +44,9 @@
       let gotParentMsg = false;
       let fallbackTimer = 0;
 
+      // Ensure there's scrollHeight to drive Spline Scroll Events even in external mode
+      if (ghost) ghost.style.display = 'block';
+
       function activateInternal() {
         if (internal) return;
         internal = true;
@@ -50,8 +54,9 @@
         if (ghost) ghost.style.display = 'block';
         // Drive timeline from this page's own scroll, so both modes behave similarly
         const computeT = () => {
-          const max = Math.max(1, document.documentElement.scrollHeight - innerHeight);
-          return Math.max(0, Math.min(1, scrollY / max));
+          const max = Math.max(1, root.scrollHeight - root.clientHeight);
+          const top = root.scrollTop || 0;
+          return Math.max(0, Math.min(1, top / max));
         };
         const onScroll = () => {
           const t = computeT();
@@ -93,8 +98,8 @@
           // Only emulate internal scroll while in external mode (so Scroll Events fire)
           if (!internal) {
             try {
-              const max = Math.max(1, document.documentElement.scrollHeight - innerHeight);
-              scrollTo(0, t * max);
+              const max = Math.max(1, root.scrollHeight - root.clientHeight);
+              root.scrollTo(0, t * max);
             } catch {}
           }
         }
