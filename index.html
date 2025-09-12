@@ -1,62 +1,91 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Self-hosted Spline Wrapper</title>
-    <style>
-      html, body { margin: 0; height: 100%; background: transparent; }
-      #spline-host { position: relative; width: 100%; height: 100%; }
-      #splineIF { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; overflow: hidden; background: transparent; }
-    </style>
-  </head>
-  <body>
-    <div id="spline-host" style="position:relative;width:100%;height:100%;">
-      <iframe
-        id="splineIF"
-        src="./scene.html"
-        title="Self-hosted Spline"
-        allow="fullscreen; autoplay; xr-spatial-tracking"
-        loading="lazy"
-        style="position:absolute;inset:0;width:100%;height:100%;border:0;display:block;overflow:hidden;background:transparent"
-        allowtransparency="true">
-      </iframe>
-    </div>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mojave UFO</title>
 
-    <script>
-      (function () {
-        const host = document.getElementById('spline-host');
-        const ifr  = document.getElementById('splineIF');
+  <!-- Use CDN first to prove it works; swap to your vendored path later -->
+  <script type="module" src="https://unpkg.com/@splinetool/viewer@1.10.57/build/spline-viewer.js"></script>
 
-        // Section-based progress: 0..1 as this Embed scrolls through the viewport
-        function computeT() {
-          const r  = host.getBoundingClientRect();
-          const vh = window.innerHeight || 1;
-          const denom = Math.max(1, r.height - vh);
-          let t = (0 - r.top) / denom;
-          return t < 0 ? 0 : t > 1 ? 1 : t;
-        }
+  <style>
+    html, body { height:100%; margin:0; background:transparent; }
+    /* give the child page its own scroll range so Spline Scroll Events can fire */
+    body { overflow:auto; scrollbar-width:none; }
+    body::-webkit-scrollbar { display:none; }
 
-        let ticking = false;
-        function send() {
-          if (!ifr?.contentWindow) return;
-          ifr.contentWindow.postMessage({ type: 'FRAMER_SCROLL', t: computeT() }, '*');
-        }
-        function onScrollOrResize() {
-          if (ticking) return;
-          ticking = true;
-          requestAnimationFrame(() => { ticking = false; send(); });
-        }
-        function onLoad() {
-          ifr.contentWindow?.postMessage({ type: 'FRAMER_SCROLL_INIT' }, '*');
-          send();
-        }
+    /* pin the viewer; let body scroll behind it */
+    #wrap { position:sticky; top:0; height:100vh; }
+    spline-viewer, canvas { width:100% !important; height:100% !important; display:block; background:transparent !important; }
 
-        ifr.addEventListener('load', onLoad);
-        addEventListener('scroll', onScrollOrResize, { passive: true });
-        addEventListener('resize', onScrollOrResize);
-        send(); // kick once
-      })();
-    </script>
-  </body>
-  </html>
+    /* invisible scroll range for Scroll Events (adjust height to taste) */
+    #scroller { height:4000px; pointer-events:none; }
+
+    /* tiny debug readout (remove when done) */
+    #dbg { position:fixed; left:8px; bottom:8px; padding:6px 8px; font:12px system-ui; color:#fff; background:#0008; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <div id="scroller" aria-hidden="true"></div>
+  <div id="wrap">
+    <spline-viewer id="sv" loading-anim="true" events-target="window"></spline-viewer>
+  </div>
+  <div id="dbg">waiting…</div>
+
+  <script>
+    (async function () {
+      const sv  = document.getElementById('sv');
+      const dbg = (t) => document.getElementById('dbg').textContent = t;
+
+      // pick whichever scene you actually deployed
+      const candidates = ['./scene-desktop.splinecode','./scene-mobile.splinecode','./scene.splinecode'];
+      let scene = null;
+      for (const u of candidates) { try { const r = await fetch(u, { method:'HEAD', cache:'no-store' }); if (r.ok) { scene = u; break; } } catch {} }
+      if (!scene) { dbg('No .splinecode found'); return; }
+      sv.setAttribute('url', scene);
+
+      // default behavior: autoplay when loaded (if we’re not scrubbing yet)
+      let scrubbing = false;
+      sv.addEventListener?.('load-complete', () => {
+        if (!scrubbing) { try { sv.play?.(); sv.setTime?.(0); } catch {} }
+        dbg(`loaded: ${scene}`);
+      });
+
+      // listen for parent messages
+      addEventListener('message', (e) => {
+        const d = e.data || {};
+        if (d.type === 'FRAMER_SCROLL_INIT') {
+          scrubbing = true;
+          try { sv.pause?.(); sv.setTime?.(0); } catch {}
+          dbg('init');
+        }
+        if (d.type === 'FRAMER_SCROLL') {
+          scrubbing = true;
+          const t = Math.max(0, Math.min(1, Number(d.t) || 0));
+          dbg(`t=${t.toFixed(3)}`);
+
+          // A) scrub timeline (if your scene uses a timeline)
+          try {
+            const dur = sv.duration || 1;
+            sv.setTime?.(t * dur);
+            sv.play?.(); // keep renderer ticking
+          } catch {}
+
+          // B) emulate page scroll so Spline Scroll Events fire
+          try {
+            const max = Math.max(1, document.documentElement.scrollHeight - innerHeight);
+            scrollTo(0, t * max);
+          } catch {}
+        }
+      });
+
+      // safety: if the custom element never registers, the viewer bundle didn’t load
+      setTimeout(() => {
+        if (!customElements.get('spline-viewer')) {
+          dbg('viewer not registered – check <script src> or CSP');
+        }
+      }, 4000);
+    })();
+  </script>
+</body>
+</html>
