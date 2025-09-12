@@ -17,3 +17,6 @@ build/
 !vendor/spline-viewer/
 !vendor/spline-viewer/build/
 !vendor/spline-viewer/build/**
+
+# Framer code component (keep local, not committed)
+SelfHostedSpline.tsx
