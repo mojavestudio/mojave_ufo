@@ -47,8 +47,8 @@
       // Ensure there's scrollHeight to drive Spline Scroll Events even in external mode
       if (ghost) {
         ghost.style.display = 'block';
-        // Set initial dynamic height
-        const scrollDistance = Math.max(window.innerHeight * 1.5, 1200); // 1.5x viewport or minimum 1200px
+        // Set minimal height for scroll animation - just enough to complete animation
+        const scrollDistance = Math.max(window.innerHeight * 0.5, 600); // 0.5x viewport or minimum 600px
         ghost.style.height = scrollDistance + 'px';
       }
 
@@ -59,7 +59,7 @@
         if (ghost) {
           ghost.style.display = 'block';
           // Dynamically set ghost height based on viewport and desired scroll distance
-          const scrollDistance = Math.max(window.innerHeight * 1.5, 1200); // 1.5x viewport or minimum 1200px
+          const scrollDistance = Math.max(window.innerHeight * 0.5, 600); // 0.5x viewport or minimum 600px
           ghost.style.height = scrollDistance + 'px';
         }
         // Drive timeline from this page's own scroll, so both modes behave similarly
@@ -102,7 +102,7 @@
             if (ghost) {
               ghost.style.display = 'block';
               // Maintain consistent ghost height in external mode
-              const scrollDistance = Math.max(window.innerHeight * 1.5, 1200);
+              const scrollDistance = Math.max(window.innerHeight * 0.5, 600);
               ghost.style.height = scrollDistance + 'px';
             }
           }
