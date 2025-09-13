@@ -1,60 +1,37 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Mojave UFO</title>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
+  <style>
+    html, body { margin:0; height:100%; background:transparent; }
+    #outer { position:relative; height:180vh; }  /* internal scroll */
+    #sticky { position:sticky; top:0; height:100vh; }
+    spline-viewer { width:100%; height:100%; display:block; }
+  </style>
+</head>
+<body>
+  <section id="outer">
+    <div id="sticky">
+      <spline-viewer id="viewer" url="./scene.splinecode" events-target="local"></spline-viewer>
+    </div>
+  </section>
 
-    <!-- Use the pinned, self-hosted Spline Viewer -->
-    <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
+  <script type="module">
+    const qp = new URLSearchParams(location.search);
+    const outer = document.getElementById('outer');
+    outer.style.height = qp.get('scrollpx')
+      ? parseInt(qp.get('scrollpx'),10) + 'px'
+      : `calc(${parseFloat(qp.get('scrollvh')||'180')} * 1vh)`;
 
-    <style>
-      html, body { margin: 0; height: 100%; background: transparent; }
-      /* Outer makes the page scroll; default 180vh if not overridden */
-      #outer { position: relative; height: 180vh; }
-      /* Sticky viewer so the canvas stays fixed while we scroll */
-      #sticky { position: sticky; top: 0; height: 100vh; }
-      body { overscroll-behavior-y: none; }
-      spline-viewer { width: 100%; height: 100%; display: block; }
-    </style>
-  </head>
-  <body>
-    <section id="outer">
-      <div id="sticky">
-        <!-- One viewer tag; we’ll set URL at runtime for mobile/desktop -->
-        <spline-viewer id="viewer" url="./scene.splinecode" events-target="local"></spline-viewer>
-      </div>
-    </section>
-
-    <script type="module">
-      // --- 1) Choose mobile/desktop scene if present ---
-      const isMobile = matchMedia('(max-width: 768px)').matches;
-      const qp = new URLSearchParams(location.search);
-      const viewer = document.getElementById('viewer');
-
-      // If you exported both, use them:
-      const mobileUrl  = './scene-mobile.splinecode';
-      const desktopUrl = './scene-desktop.splinecode';
-      fetch(mobileUrl, { method: 'HEAD' }).then(r => {
-        if (r.ok) viewer.setAttribute('url', isMobile ? mobileUrl : (qp.get('force') === 'mobile' ? mobileUrl : desktopUrl));
-      }).catch(() => {
-        // Fallback: keep scene.splinecode if mobile/desktop files aren’t present
+    if (qp.get('external') === '1') {
+      window.addEventListener('message', (e) => {
+        if (!e?.data || e.data.type !== 'SCROLL_PROGRESS') return;
+        const max = document.documentElement.scrollHeight - innerHeight;
+        document.documentElement.scrollTop = e.data.progress * Math.max(0, max);
       });
-
-      // --- 2) Allow parent to set scroll height via query (?scrollvh= or ?scrollpx=) ---
-      const outer = document.getElementById('outer');
-      const vh = parseFloat(qp.get('scrollvh') || '180');
-      const px = parseInt(qp.get('scrollpx') || '0', 10);
-      outer.style.height = px ? `${px}px` : `calc(${vh} * 1vh)`;
-
-      // --- 3) Optional bridge: parent-driven scroll via postMessage (?external=1) ---
-      if (qp.get('external') === '1') {
-        window.addEventListener('message', (e) => {
-          if (!e?.data || e.data.type !== 'SCROLL_PROGRESS') return;
-          const max = document.documentElement.scrollHeight - window.innerHeight;
-          document.documentElement.scrollTop = e.data.progress * Math.max(0, max);
-        });
-      }
-    </script>
-  </body>
+    }
+  </script>
+</body>
 </html>
