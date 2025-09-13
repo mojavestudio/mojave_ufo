@@ -10,119 +10,65 @@
   <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
 
 <style>
-  /* Allow the document to grow and scroll */
-  html, body { margin: 0; min-height: 100%; background: transparent; overscroll-behavior: none; }
-
-  spline-viewer { display: block; touch-action: pan-y; }
-
-  /* Use sticky instead of absolute so the page can scroll naturally */
-  #wrap { position: sticky; top: 0; height: 100vh; }
-
-  /* Optional: if you don't need pointer interactions, uncomment to prevent wheel from being captured
-  spline-viewer { pointer-events: none; }
-  */
+  /* Child defaults: allow standalone testing; external mode will force overflow hidden via script */
+  html, body { margin: 0; height: 100%; background: transparent; }
+  #wrap { position: absolute; inset: 0; }
+  spline-viewer { display: block; width: 100%; height: 100%; pointer-events: none; }
 </style>
 </head>
 <body>
   <div id="wrap">
-    <spline-viewer
-      id="sv"
-      url="./scene.splinecode"
-      events-target="window"
-      loading-anim="true"
-      style="width:100%; height:100%"
-    ></spline-viewer>
+    <!-- IMPORTANT: events-target="global" for current viewer builds -->
+    <spline-viewer id="sv" url="./scene.splinecode" events-target="global" loading-anim="true"></spline-viewer>
   </div>
-<!-- Invisible scroller to provide scrollHeight for Spline Scroll Events -->
-<div id="ghost-scroll" style="height:200vh; visibility:hidden; pointer-events:none;"></div>
 
-<script>
-(() => {
-  const sv     = document.getElementById('sv');
-  const root   = document.scrollingElement || document.documentElement;
-  const ghost  = document.getElementById('ghost-scroll');
+  <script>
+  (function () {
+    const sv = document.getElementById('sv');
+    const html = document.documentElement;
+    const body = document.body;
+    const q  = new URLSearchParams(location.search);
+    const external = q.get('external') === '1' || q.get('external') === 'true';
 
-  const q        = new URLSearchParams(location.search);
-  const external = q.get('external') === '1' || q.get('external') === 'true';
-
-  // How long should the scroll be? Use ?scrollvh=110 or ?scrollpx=900
-  const scrollPx = (() => {
-    const px = parseFloat(q.get('scrollpx') || '');
-    const vh = parseFloat(q.get('scrollvh') || '');
-    if (!Number.isNaN(px) && px > 0) return px;
-    if (!Number.isNaN(vh) && vh > 0) return Math.round(window.innerHeight * (vh / 100));
-    return Math.round(window.innerHeight * 1.2); // default ~1.2 screens
-  })();
-
-  // Visual end of motion on the 0..1 timeline (e.g., ?end=0.68)
-  const end = (() => {
-    const e = parseFloat(q.get('end') || '');
-    return Number.isFinite(e) ? Math.min(1, Math.max(0.05, e)) : 1;
-  })();
-
-  // Optional: snap the document to end (trim spacer) once bottom is reached
-  const snap = q.get('snap') === '1' || q.get('snap') === 'true';
-
-  function setGhostHeight(px) {
-    ghost.style.display = 'block';
-    ghost.style.height  = Math.max(1, px) + 'px';
-  }
-
-  setGhostHeight(scrollPx);
-
-  let internal = !external;
-  let locked   = false;   // when true, spacer has been trimmed
-  let lockedAt = 0;
-
-  function setProgressFromP(p) {
-    // Scale progress by `end` so visuals finish at page bottom without dead space
-    const t = Math.min(1, Math.max(0, p * end));
-    try { sv.setTime?.(t); } catch {}
-
-    if (snap && !locked && p >= 1) {
-      locked = true;
-      lockedAt = root.scrollTop;
-      setGhostHeight(lockedAt + 1);
-    }
-  }
-
-  function compute() {
-    const max = Math.max(1, root.scrollHeight - root.clientHeight);
-    const p   = Math.min(1, Math.max(0, root.scrollTop / max));
-
-    // Allow undoing the snap by scrolling up
-    if (locked && root.scrollTop < lockedAt - 2) {
-      locked = false;
-      setGhostHeight(scrollPx);
+    // External mode: iframe is paint-only. No internal scroll.
+    if (external) {
+      html.style.overflow = 'hidden';
+      body.style.overflow = 'hidden';
     }
 
-    setProgressFromP(p);
-  }
+    // Wait for viewer load before setting time
+    sv.addEventListener('load-complete', () => {
+      try { sv.setTime?.(0); } catch {}
+    });
 
-  window.addEventListener('scroll', () => { if (internal) compute(); }, { passive: true });
-  window.addEventListener('resize', () => {
-    if (!locked) setGhostHeight(scrollPx);
-    if (internal) compute();
-  });
-  compute();
-
-  // External (parent-driven) stays intact; we don't scale external progress
-  window.addEventListener('message', (e) => {
-    const d = e?.data || {};
-    if (!d || typeof d !== 'object') return;
-    if (d.type === 'FRAMER_SCROLL_INIT') { internal = false; return; }
-    if (d.type === 'FRAMER_SCROLL_PROGRESS' && typeof d.progress === 'number') {
-      internal = false;
-      const p = Math.min(1, Math.max(0, d.progress));
-      try { sv.setTime?.(p); } catch {}
-      if (snap && !locked && p >= 1) {
-        locked = true;
-        lockedAt = root.scrollTop;
-        setGhostHeight(lockedAt + 1);
+    // Parent → child progress (0..1)
+    window.addEventListener('message', (e) => {
+      const d = e?.data || {};
+      if (!d || typeof d !== 'object') return;
+      if (d.type === 'FRAMER_SCROLL_PROGRESS' && typeof d.progress === 'number') {
+        const t = Math.min(1, Math.max(0, d.progress));
+        try { sv.setTime?.(t); } catch {}
       }
+    });
+
+    // Minimal standalone fallback: only when not embedded
+    if (!external) {
+      // create a small spacer just for testing; collapse at end to avoid dead space
+      const ghost = document.createElement('div');
+      ghost.style.cssText = 'height:120vh; visibility:hidden; pointer-events:none;';
+      body.appendChild(ghost);
+
+      function drive() {
+        const max = Math.max(1, html.scrollHeight - html.clientHeight);
+        const t   = Math.min(1, Math.max(0, html.scrollTop / max));
+        try { sv.setTime?.(t); } catch {}
+        if (t >= 1) ghost.style.height = (html.scrollTop + 1) + 'px';
+      }
+      window.addEventListener('scroll', drive, { passive: true });
+      window.addEventListener('resize', drive);
+      drive();
     }
-  });
-})();
-</script>
+  })();
+  </script>
 </body>
 </html>
