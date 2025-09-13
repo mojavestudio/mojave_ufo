@@ -38,6 +38,7 @@
 <body>
   <div id="wrap">
     <spline-viewer
+      id="sv"
       url="./scene.splinecode"
       events-target="global"
       loading="eager"
@@ -68,7 +69,10 @@
           const isPhone = /Mobi|Android/i.test(navigator.userAgent);
           const px = Math.max(0, userPx || (isPhone ? 900 : 1200));
           const ghost = document.getElementById('ghost-scroll');
-          if (ghost) ghost.style.height = px + 'px';
+          if (ghost) {
+            ghost.style.display = 'block';
+            ghost.style.height = px + 'px';
+          }
         } else {
           // Passthrough mode
           document.documentElement.classList.remove('embed-scroll');
@@ -76,7 +80,10 @@
           document.documentElement.classList.add('embed-pass');
           document.body.classList.add('embed-pass');
           const ghost = document.getElementById('ghost-scroll');
-          if (ghost) ghost.style.height = '0px';
+          if (ghost) {
+            ghost.style.display = 'none';
+            ghost.style.height = '0px';
+          }
         }
       }
 
