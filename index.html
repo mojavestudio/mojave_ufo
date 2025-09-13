@@ -19,11 +19,15 @@
 
     /* Internal scroll fallback (enabled dynamically if no parent messages arrive) */
     html.internal #wrap { position: sticky; top: 0; height: 100vh; }
+    
+    /* External/embedded mode: prevent any internal scrolling */
+    html.is-external, body.is-external { overflow: hidden !important; }
+    html.is-external #wrap { position: fixed; inset: 0; }
   </style>
 </head>
 <body>
   <div id="wrap">
-    <spline-viewer id="sv" url="./scene.splinecode" events-target="window" loading-anim="true"></spline-viewer>
+    <spline-viewer id="sv" url="./scene.splinecode" events-target="global" loading-anim="true"></spline-viewer>
   </div>
   <!-- Invisible scroller to provide scrollHeight for Spline Scroll Events -->
   <div id="ghost-scroll" style="height:200vh; visibility:hidden; pointer-events:none; display:none;"></div>
@@ -39,21 +43,34 @@
       const params = new URLSearchParams(location.search);
       const forceInternal = params.get('internal') === '1';
       const forceExternal = params.get('external') === '1';
+      const isExternal = params.has('external'); // Check for any external param (including ?external=1)
 
       let internal = !!forceInternal;
       let gotParentMsg = false;
       let fallbackTimer = 0;
 
-      // Ensure there's scrollHeight to drive Spline Scroll Events even in external mode
-      if (ghost) {
-        ghost.style.display = 'block';
-        // Set minimal height for scroll animation - just enough to complete animation
-        const scrollDistance = Math.max(window.innerHeight * 0.5, 600); // 0.5x viewport or minimum 600px
-        ghost.style.height = scrollDistance + 'px';
+      // When embedded (?external): kill internal scrolling and ghost height
+      if (isExternal) {
+        htmlEl.classList.add('is-external');
+        document.body.classList.add('is-external');
+        htmlEl.style.overflow = 'hidden';
+        document.body.style.overflow = 'hidden';
+        if (ghost) {
+          ghost.style.display = 'none';   // Don't enable ghost scroll
+          ghost.style.height = '0px';     // Ensure no height
+        }
+      } else {
+        // Only setup ghost scroll when NOT embedded
+        if (ghost) {
+          ghost.style.display = 'block';
+          // Set initial dynamic height
+          const scrollDistance = Math.max(window.innerHeight * 1.5, 1200); // 1.5x viewport or minimum 1200px
+          ghost.style.height = scrollDistance + 'px';
+        }
       }
 
       function activateInternal() {
-        if (internal) return;
+        if (internal || isExternal) return; // Guard: don't activate internal mode when embedded
         internal = true;
         htmlEl.classList.add('internal');
         if (ghost) {
@@ -95,8 +112,8 @@
         if (d.type === 'FRAMER_SCROLL_INIT' || d.type === 'FRAMER_SCROLL') {
           gotParentMsg = true;
           if (fallbackTimer) { window.clearTimeout(fallbackTimer); fallbackTimer = 0; }
-          // Ensure external mode if parent is driving
-          if (!forceInternal && internal) { 
+          // Ensure external mode if parent is driving (but respect ?external param)
+          if (!forceInternal && internal && !isExternal) { 
             internal = false; 
             htmlEl.classList.remove('internal'); 
             if (ghost) {
