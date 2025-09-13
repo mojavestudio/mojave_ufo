@@ -9,91 +9,114 @@
   <!-- Self-hosted Spline viewer -->
   <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
 
-  <style>
-    /* Base */
-    html, body { margin: 0; height: 100%; background: transparent; }
+<style>
+  /* Allow the document to grow and scroll */
+  html, body { margin: 0; min-height: 100%; background: transparent; }
 
-    /* Default: sticky viewer; document provides scroll in scroll-driven mode */
-    #wrap { position: sticky; top: 0; height: 100svh; }
-    spline-viewer { display: block; width: 100%; height: 100%; }
+  /* Use sticky instead of absolute so the page can scroll naturally */
+  #wrap { position: sticky; top: 0; height: 100vh; }
 
-    /* The ONLY flow-height in scroll-driven mode */
-    #ghost-scroll { width: 1px; height: 0; }
-
-    /* ---------- Passthrough (no internal iframe scroll) ---------- */
-    /* Do NOT use overscroll-behavior: contain here; it blocks parent scroll chaining */
-    html.embed-pass, body.embed-pass { overflow: hidden; }
-    html.embed-pass #wrap { position: fixed; inset: 0; height: auto; }
-
-    /* ---------- Scroll-driven (internal iframe scroll) ---------- */
-    /* Allow scroll and allow chaining to parent */
-    html.embed-scroll, body.embed-scroll {
-      overflow-y: auto;
-      overscroll-behavior: auto; /* allow chaining, not 'contain' */
-      -webkit-overflow-scrolling: touch;
-      touch-action: pan-y;
-    }
-  </style>
+  /* Optional: if you don't need pointer interactions, uncomment to prevent wheel from being captured
+  spline-viewer { pointer-events: none; }
+  */
+</style>
 </head>
 <body>
   <div id="wrap">
     <spline-viewer
       id="sv"
       url="./scene.splinecode"
-      events-target="global"
-      loading="eager"
+      events-target="window"
+      loading-anim="true"
+      style="width:100%; height:100%"
     ></spline-viewer>
   </div>
-  <!-- spacer used ONLY in scroll-driven mode -->
-  <div id="ghost-scroll" aria-hidden="true"></div>
+<!-- Invisible scroller to provide scrollHeight for Spline Scroll Events -->
+<div id="ghost-scroll" style="visibility:hidden; pointer-events:none; display:none;"></div>
 
-  <script>
-    (function () {
-      const qs = new URLSearchParams(location.search);
-      const isEmbedded = qs.get('external') === '1' || (function(){ try { return window.self !== window.top } catch { return true } })();
-      const userPx = Number(qs.get('scrollpx'));
-      const wantsScrollBudget = Number.isFinite(userPx);
+<script>
+(function () {
+  const sv    = document.getElementById('sv');
+  const html  = document.documentElement;
+  const root  = document.scrollingElement || html;     // <-- cross-browser
+  const ghost = document.getElementById('ghost-scroll');
 
-      if (isEmbedded) {
-        // Clear any legacy inline locks
-        document.documentElement.style.overflow = '';
-        document.body.style.overflow = '';
+  // Query flags
+  const params   = new URLSearchParams(location.search);
+  const external = params.get('external') === '1' || params.get('external') === 'true';
 
-        if (wantsScrollBudget) {
-          // Scroll-driven mode
-          document.documentElement.classList.remove('embed-pass');
-          document.body.classList.remove('embed-pass');
-          document.documentElement.classList.add('embed-scroll');
-          document.body.classList.add('embed-scroll');
+  // Mode state
+  let internal       = !external;   // default to internal when no external driver
+  let gotParentMsg   = false;
+  let fallbackTimer  = 0;
 
-          const isPhone = /Mobi|Android/i.test(navigator.userAgent);
-          const px = Math.max(0, userPx || (isPhone ? 900 : 1200));
-          const ghost = document.getElementById('ghost-scroll');
-          if (ghost) {
-            ghost.style.display = 'block';
-            ghost.style.height = px + 'px';
-          }
-        } else {
-          // Passthrough mode
-          document.documentElement.classList.remove('embed-scroll');
-          document.body.classList.remove('embed-scroll');
-          document.documentElement.classList.add('embed-pass');
-          document.body.classList.add('embed-pass');
-          const ghost = document.getElementById('ghost-scroll');
-          if (ghost) {
-            ghost.style.display = 'none';
-            ghost.style.height = '0px';
-          }
-        }
-      }
+  // Ensure spacer exists + dynamic height
+  function setGhostHeight() {
+    if (!ghost) return;
+    ghost.style.display = 'block';
+    const scrollDistance = Math.max(window.innerHeight * 1.5, 1200); // 1.5×vh or 1200px
+    ghost.style.height = scrollDistance + 'px';
+  }
 
-      // Safety: if viewer never registers, warn
-      setTimeout(() => {
-        if (!customElements.get('spline-viewer')) {
-          console.warn('spline-viewer not registered — check ./vendor/spline-viewer/build/spline-viewer.js');
-        }
-      }, 4000);
-    })();
-  </script>
+  setGhostHeight();
+  window.addEventListener('resize', setGhostHeight);
+
+  function computeT() {
+    // total scrollable distance
+    const max = Math.max(1, root.scrollHeight - root.clientHeight);
+    const t   = Math.min(1, Math.max(0, root.scrollTop / max));
+
+    // Spline viewer accepts normalized timeline via setTime for scroll timelines
+    try { sv.setTime?.(t); } catch {}
+  }
+
+  function activateInternal() {
+    if (internal) return;
+    internal = true;
+    computeT(); // kick once
+  }
+
+  // If we expect a parent but never hear from it, fall back to internal after 600ms
+  if (external) {
+    fallbackTimer = window.setTimeout(() => {
+      if (!gotParentMsg) activateInternal();
+    }, 600);
+  }
+
+  // Always drive timeline from window scroll in internal mode
+  window.addEventListener('scroll', () => {
+    if (internal) computeT();
+  }, { passive: true });
+  window.addEventListener('resize', () => {
+    if (internal) computeT();
+  });
+  computeT();
+
+  // Parent → child messages (external mode)
+  window.addEventListener('message', (e) => {
+    const d = e?.data || {};
+    if (!d || typeof d !== 'object') return;
+
+    if (d.type === 'FRAMER_SCROLL_INIT') {
+      gotParentMsg = true;
+      if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = 0; }
+      // Switch to external driving
+      internal = false;
+      setGhostHeight();
+      try { sv.pause?.(); sv.setTime?.(0); } catch {}
+      return;
+    }
+
+    if (d.type === 'FRAMER_SCROLL_PROGRESS' && typeof d.progress === 'number') {
+      gotParentMsg = true;
+      if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = 0; }
+      internal = false;
+      setGhostHeight();
+      try { sv.setTime?.(Math.min(1, Math.max(0, d.progress))); } catch {}
+      return;
+    }
+  });
+})();
+</script>
 </body>
 </html>
