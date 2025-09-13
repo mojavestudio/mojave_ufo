@@ -26,7 +26,7 @@
     <spline-viewer id="sv" url="./scene.splinecode" events-target="window" loading-anim="true"></spline-viewer>
   </div>
   <!-- Invisible scroller to provide scrollHeight for Spline Scroll Events -->
-  <div id="ghost-scroll" style="height:4000px; visibility:hidden; pointer-events:none; display:none;"></div>
+  <div id="ghost-scroll" style="height:200vh; visibility:hidden; pointer-events:none; display:none;"></div>
 
   <script>
     (function () {
@@ -45,13 +45,23 @@
       let fallbackTimer = 0;
 
       // Ensure there's scrollHeight to drive Spline Scroll Events even in external mode
-      if (ghost) ghost.style.display = 'block';
+      if (ghost) {
+        ghost.style.display = 'block';
+        // Set initial dynamic height
+        const scrollDistance = Math.max(window.innerHeight * 1.5, 1200); // 1.5x viewport or minimum 1200px
+        ghost.style.height = scrollDistance + 'px';
+      }
 
       function activateInternal() {
         if (internal) return;
         internal = true;
         htmlEl.classList.add('internal');
-        if (ghost) ghost.style.display = 'block';
+        if (ghost) {
+          ghost.style.display = 'block';
+          // Dynamically set ghost height based on viewport and desired scroll distance
+          const scrollDistance = Math.max(window.innerHeight * 1.5, 1200); // 1.5x viewport or minimum 1200px
+          ghost.style.height = scrollDistance + 'px';
+        }
         // Drive timeline from this page's own scroll, so both modes behave similarly
         const computeT = () => {
           const max = Math.max(1, root.scrollHeight - root.clientHeight);
@@ -86,7 +96,16 @@
           gotParentMsg = true;
           if (fallbackTimer) { window.clearTimeout(fallbackTimer); fallbackTimer = 0; }
           // Ensure external mode if parent is driving
-          if (!forceInternal && internal) { internal = false; htmlEl.classList.remove('internal'); if (ghost) ghost.style.display = 'block'; }
+          if (!forceInternal && internal) { 
+            internal = false; 
+            htmlEl.classList.remove('internal'); 
+            if (ghost) {
+              ghost.style.display = 'block';
+              // Maintain consistent ghost height in external mode
+              const scrollDistance = Math.max(window.innerHeight * 1.5, 1200);
+              ghost.style.height = scrollDistance + 'px';
+            }
+          }
         }
         if (d.type === 'FRAMER_SCROLL_INIT') {
           try { sv.pause?.(); sv.setTime?.(0); } catch {}
