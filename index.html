@@ -2,10 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
-  />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Mojave UFO</title>
 
   <!-- Pinned self-hosted viewer is fine -->
@@ -15,20 +12,20 @@
     /* Base */
     html, body { margin: 0; height: 100%; background: transparent; }
 
-    /* ✅ EMBED MODE: iframe document MUST be scrollable */
+    /* EMBED mode: allow internal scroll for Scroll Event progress */
     html.embed, body.embed {
-      overflow-y: auto;               /* <-- never hidden */
-      overscroll-behavior: contain;   /* avoid chaining/bounce */
+      overflow-y: auto;
+      overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
       touch-action: pan-y;
     }
 
-    /* Keep the viewer visible while the page scrolls past a spacer */
+    /* Sticky viewer stays in view while page scrolls through spacer */
     #wrap { position: sticky; top: 0; height: 100vh; }
 
     spline-viewer { display: block; width: 100%; height: 100%; }
 
-    /* The ONLY flow-height provider in embed mode */
+    /* Precise scroll budget - matches Spline "End After" pixels */
     #ghost-scroll { width: 1px; height: 0; }
   </style>
 </head>
@@ -36,12 +33,12 @@
   <div id="wrap">
     <spline-viewer
       url="./scene.splinecode"
-      events-target="global"   <!-- valid values: local | global -->
+      events-target="global"
       loading="eager"
     ></spline-viewer>
   </div>
 
-  <!-- precise scroll budget lives OUTSIDE the sticky viewer -->
+  <!-- Spacer provides exact scroll distance for Spline Scroll Event -->
   <div id="ghost-scroll" aria-hidden="true"></div>
 
   <script>
@@ -52,15 +49,19 @@
       document.documentElement.classList.add("embed");
       document.body.classList.add("embed");
 
-      // Parse & apply scroll budget in pixels for Spline Scroll Event
+      // Parse scroll budget - must match your Spline scene's "End After" values
       const userPx = Number(qs.get("scrollpx"));
       const isPhone = /Mobi|Android/i.test(navigator.userAgent);
-      const fallback = isPhone ? 900 : 1200;  // adjust once if needed
-      const px = Number.isFinite(userPx) ? userPx : fallback;
+      const fallback = isPhone ? 900 : 1200;  // tune to match your scene
+      const scrollBudgetPx = Number.isFinite(userPx) ? userPx : fallback;
 
       const ghost = document.getElementById("ghost-scroll");
-      ghost.style.height = Math.max(0, px) + "px";
+      ghost.style.height = Math.max(0, scrollBudgetPx) + "px";
     }
+
+    // Clear any leftover overflow locks from previous versions
+    document.documentElement.style.overflow = "";
+    document.body.style.overflow = "";
   </script>
 </body>
 </html>
