@@ -19,7 +19,7 @@
 <body>
   <div id="wrap">
     <!-- IMPORTANT: events-target="global" for current viewer builds -->
-    <spline-viewer id="sv" url="./scene.splinecode" events-target="global" loading-anim="true"></spline-viewer>
+    <spline-viewer id="sv" url="./scene.splinecode" events-target="global" intercept-scroll="false" unloadable="false" loading-anim="true"></spline-viewer>
   </div>
 
   <script>
@@ -28,22 +28,32 @@
     const html = document.documentElement;
     const body = document.body;
     const q  = new URLSearchParams(location.search);
-    const external = q.get('external') === '1' || q.get('external') === 'true';
 
-    // External mode: iframe is paint-only. No internal scroll.
+    // Consider embedded if in iframe OR explicit param
+    let embedded = false;
+    try { embedded = window.self !== window.top; } catch { embedded = true; }
+    const external = embedded || q.get('external') === '1' || q.get('external') === 'true';
+
+    // External mode: paint-only. No internal scroll.
     if (external) {
       html.style.overflow = 'hidden';
       body.style.overflow = 'hidden';
     }
 
-    // Wait for viewer load before setting time
-    sv.addEventListener('load-complete', () => {
-      try { sv.setTime?.(0); } catch {}
-    });
+    // READY handshake to parent (beat races)
+    const ping = () => { try { parent.postMessage({ type:'SPLINE_IFRAME_READY' }, '*'); } catch {} };
+    ping();
+    window.addEventListener('DOMContentLoaded', ping);
+    window.addEventListener('load', ping);
+    sv?.addEventListener?.('load', ping);
+    sv?.addEventListener?.('load-complete', ping);
+    // a few delayed pings
+    setTimeout(ping, 150);
+    setTimeout(ping, 450);
 
-    // Parent → child progress (0..1)
+    // Receive normalized progress 0..1 from parent
     window.addEventListener('message', (e) => {
-      const d = e?.data || {};
+      const d = e?.data;
       if (!d || typeof d !== 'object') return;
       if (d.type === 'FRAMER_SCROLL_PROGRESS' && typeof d.progress === 'number') {
         const t = Math.min(1, Math.max(0, d.progress));
@@ -51,9 +61,8 @@
       }
     });
 
-    // Minimal standalone fallback: only when not embedded
+    // Minimal standalone fallback
     if (!external) {
-      // create a small spacer just for testing; collapse at end to avoid dead space
       const ghost = document.createElement('div');
       ghost.style.cssText = 'height:120vh; visibility:hidden; pointer-events:none;';
       body.appendChild(ghost);
