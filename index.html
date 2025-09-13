@@ -2,31 +2,32 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <!-- fixed zoom; consistent wheel/touch in embeds -->
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Mojave UFO</title>
 
-  <!-- Pinned self-hosted viewer is fine -->
+  <!-- Self-hosted Spline viewer -->
   <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
 
   <style>
     /* Base */
     html, body { margin: 0; height: 100%; background: transparent; }
 
-    /* EMBED mode: allow internal scroll for Scroll Event progress */
-    html.embed, body.embed {
-      overflow-y: auto;
-      overscroll-behavior: contain;
-      -webkit-overflow-scrolling: touch;
-      touch-action: pan-y;
-    }
-
-    /* Sticky viewer stays in view while page scrolls through spacer */
-    #wrap { position: sticky; top: 0; height: 100vh; }
-
+    /* Sticky viewer keeps the scene in view while the document provides scroll */
+    #wrap { position: sticky; top: 0; height: 100svh; }
     spline-viewer { display: block; width: 100%; height: 100%; }
 
-    /* Precise scroll budget - matches Spline "End After" pixels */
+    /* The ONLY flow-height source when we enable internal (iframe) scroll */
     #ghost-scroll { width: 1px; height: 0; }
+
+    /* ---------- PASSTHROUGH MODE (no internal scroll) ---------- */
+    /* When .embed-no-scroll is on <html>, the iframe's document won't scroll. */
+    html.embed-no-scroll, body.embed-no-scroll {
+      overflow: hidden;
+      overscroll-behavior: none;
+    }
+    /* In this mode the viewer is pinned absolutely so no flow height exists. */
+    html.embed-no-scroll #wrap { position: fixed; inset: 0; height: auto; }
   </style>
 </head>
 <body>
@@ -37,31 +38,50 @@
       loading="eager"
     ></spline-viewer>
   </div>
-
-  <!-- Spacer provides exact scroll distance for Spline Scroll Event -->
+  <!-- spacer used ONLY in scroll-driven mode -->
   <div id="ghost-scroll" aria-hidden="true"></div>
 
   <script>
-    const qs = new URLSearchParams(location.search);
-    const isEmbedded = qs.get("external") === "1" || window.self !== window.top;
+    (function () {
+      const qs = new URLSearchParams(location.search);
+      const isEmbedded = qs.get("external") === "1" || (function(){ try { return window.self !== window.top } catch { return true } })();
 
-    if (isEmbedded) {
-      document.documentElement.classList.add("embed");
-      document.body.classList.add("embed");
-
-      // Parse scroll budget - must match your Spline scene's "End After" values
+      // “scrollpx” present => scroll-driven mode; otherwise passthrough mode.
       const userPx = Number(qs.get("scrollpx"));
-      const isPhone = /Mobi|Android/i.test(navigator.userAgent);
-      const fallback = isPhone ? 900 : 1200;  // tune to match your scene
-      const scrollBudgetPx = Number.isFinite(userPx) ? userPx : fallback;
+      const wantsScrollBudget = Number.isFinite(userPx);
 
-      const ghost = document.getElementById("ghost-scroll");
-      ghost.style.height = Math.max(0, scrollBudgetPx) + "px";
-    }
+      if (isEmbedded) {
+        // Clean up any previous inline locks
+        document.documentElement.style.overflow = "";
+        document.body.style.overflow = "";
 
-    // Clear any leftover overflow locks from previous versions
-    document.documentElement.style.overflow = "";
-    document.body.style.overflow = "";
+        if (wantsScrollBudget) {
+          // ---------- SCROLL-DRIVEN MODE ----------
+          // Allow the iframe document to scroll and give it a precise pixel budget.
+          const isPhone = /Mobi|Android/i.test(navigator.userAgent);
+          const px = Math.max(0, userPx || (isPhone ? 900 : 1200));
+          const ghost = document.getElementById("ghost-scroll");
+          if (ghost) ghost.style.height = px + "px";
+          // Sticky layout on #wrap remains active by default.
+        } else {
+          // ---------- PASSTHROUGH MODE (NO TRAP) ----------
+          // No internal scroll; let the parent page (Framer) scroll under the cursor.
+          document.documentElement.classList.add("embed-no-scroll");
+          document.body.classList.add("embed-no-scroll");
+          // Safety: zero out any spacer height
+          const ghost = document.getElementById("ghost-scroll");
+          if (ghost) ghost.style.height = "0px";
+        }
+      }
+
+      // Safety: if viewer never registers, warn
+      setTimeout(() => {
+        if (!customElements.get('spline-viewer')) {
+          console.warn('spline-viewer not registered — check ./vendor/spline-viewer/build/spline-viewer.js');
+        }
+      }, 4000);
+    })();
   </script>
 </body>
 </html>
+
