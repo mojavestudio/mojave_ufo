@@ -2,58 +2,77 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+  />
   <title>Mojave UFO</title>
-  <!-- Self-hosted viewer -->
+
+  <!-- Self-hosted Spline Viewer (your pinned file is fine) -->
   <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
+
   <style>
-    html, body { margin: 0; padding: 0; background: transparent; }
-    /* Pin the viewer; let the PAGE (not a full-screen absolute div) be the scroller */
-    #pin { position: sticky; top: 0; height: 100vh; }
-    spline-viewer { display: block; width: 100%; height: 100%; }
-    /* Real scroll height lives HERE (outside the pinned container) */
-    #spacer { height: 2000px; }
+    /* Base: full-bleed canvas, no default traps */
+    html, body { margin: 0; height: 100%; background: transparent; }
+
+    /* EMBED mode must allow internal scroll (critical) */
+    html.embed, body.embed {
+      overflow-y: auto;           /* ensure the iframe document can scroll */
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+      touch-action: pan-y;
+    }
+
+    /* Sticky canvas: stays pinned while the spacer provides scroll distance */
+    #wrap {
+      position: sticky;
+      top: 0;
+      height: 100vh;              /* keep the viewer in view while we scroll */
+    }
+
+    /* Viewer fills its wrapper */
+    spline-viewer {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* The only flow-height provider */
+    #ghost-scroll { width: 1px; height: 0; }
   </style>
 </head>
 <body>
-  <div id="pin">
-    <!-- Listen on the iframe window -->
-    <spline-viewer id="sv" url="./scene.splinecode" events-target="global" loading-anim="true"></spline-viewer>
+  <div id="wrap">
+    <!-- Use valid events-target values -->
+    <spline-viewer
+      url="./scene.splinecode"
+      events-target="global"
+      loading="eager"
+    ></spline-viewer>
   </div>
-  <!-- Must be OUTSIDE #pin so it affects document height -->
-  <div id="spacer" aria-hidden="true"></div>
+
+  <!-- Spacer that defines the exact scroll budget in EMBED mode -->
+  <div id="ghost-scroll" aria-hidden="true"></div>
 
   <script>
-    (function () {
-      const params   = new URLSearchParams(location.search);
-      const scrollpx = Math.max(0, parseInt(params.get('scrollpx') || '2000', 10));
-      const external = params.has('external'); // ?external=1 turns on bridge
+    const qs = new URLSearchParams(location.search);
+    const isEmbedded = qs.get("external") === "1" || window.self !== window.top;
 
-      // Make the iframe page tall so programmatic scroll means something
-      const spacer = document.getElementById('spacer');
-      if (spacer) spacer.style.height = scrollpx + 'px';
+    if (isEmbedded) {
+      document.documentElement.classList.add("embed");
+      document.body.classList.add("embed");
+    }
 
-      // If parent is driving progress, listen for its messages and set our scrollTop
-      if (external) {
-        const doc = document.scrollingElement || document.documentElement;
-        const sv  = document.getElementById('sv');
-        window.addEventListener('message', (e) => {
-          const d = e && e.data || {};
-          if (d.type !== 'SCROLL_PROGRESS') return;
-          const p   = Math.max(0, Math.min(1, Number(d.progress) || 0));
-          const max = Math.max(0, doc.scrollHeight - window.innerHeight);
-          doc.scrollTop = p * max;
-          // Nudge Spline listeners; also scrub timeline so timeline-only scenes sync
-          try { window.dispatchEvent(new Event('scroll')); } catch {}
-          try { const dur = Number(sv?.duration || 1); sv.setTime?.(p * dur); sv.play?.(); } catch {}
-        }, { passive: true });
-      }
+    // Calibrated scroll budget (pixels); Spline's Scroll Event uses px
+    const userPx   = Number(qs.get("scrollpx"));
+    const isPhone  = /Mobi|Android/i.test(navigator.userAgent);
+    const fallback = isPhone ? 900 : 1200;   // tune once, then pass &scrollpx when needed
+    const scrollBudgetPx = Number.isFinite(userPx) ? userPx : fallback;
 
-      // Safety: if viewer never registers, the script didn't load
-      setTimeout(() => {
-        if (!customElements.get('spline-viewer')) console.warn('spline-viewer not registered — check script path or CSP');
-      }, 4000);
-    })();
+    if (isEmbedded) {
+      const ghost = document.getElementById("ghost-scroll");
+      ghost.style.height = Math.max(0, scrollBudgetPx) + "px";
+    }
   </script>
 </body>
 </html>
