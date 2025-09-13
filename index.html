@@ -33,33 +33,22 @@
     const qp = new URLSearchParams(location.search);
     const outer = document.getElementById('outer');
 
+    // Fallback: compute px height if svh unsupported or to match ?scrollvh exactly
     function applyHeight() {
+      const vh = parseFloat(qp.get('scrollvh') || '170');
       const px = parseInt(qp.get('scrollpx') || '0', 10);
       if (px) {
         outer.style.height = px + 'px';
         return;
       }
-      const vh = parseFloat(qp.get('scrollvh') || '170');
+      // Use visualViewport for more accurate mobile vh
       const unit = (window.visualViewport?.height || window.innerHeight) / 100;
       outer.style.height = (vh * unit) + 'px';
     }
 
-    // Only apply JS fallback if svh unsupported or query params present
-    const needsJS = !CSS.supports('height', '100svh') || qp.has('scrollvh') || qp.has('scrollpx');
-    if (needsJS) {
-      applyHeight();
-      window.visualViewport?.addEventListener('resize', applyHeight);
-      window.addEventListener('orientationchange', applyHeight);
-      window.addEventListener('resize', applyHeight);
-    }
-
-    if (qp.get('external') === '1') {
-      window.addEventListener('message', (e) => {
-        if (!e?.data || e.data.type !== 'SCROLL_PROGRESS') return;
-        const max = document.documentElement.scrollHeight - innerHeight;
-        document.documentElement.scrollTop = e.data.progress * Math.max(0, max);
-      });
-    }
+    applyHeight();
+    window.visualViewport?.addEventListener('resize', applyHeight);
+    window.addEventListener('orientationchange', applyHeight);
   </script>
 </body>
 </html>
