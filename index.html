@@ -8,50 +8,40 @@
   />
   <title>Mojave UFO</title>
 
-  <!-- Self-hosted Spline Viewer (your pinned file is fine) -->
+  <!-- Pinned self-hosted viewer is fine -->
   <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
 
   <style>
-    /* Base: full-bleed canvas, no default traps */
+    /* Base */
     html, body { margin: 0; height: 100%; background: transparent; }
 
-    /* EMBED mode must allow internal scroll (critical) */
+    /* ✅ EMBED MODE: iframe document MUST be scrollable */
     html.embed, body.embed {
-      overflow-y: auto;           /* ensure the iframe document can scroll */
-      overscroll-behavior: contain;
+      overflow-y: auto;               /* <-- never hidden */
+      overscroll-behavior: contain;   /* avoid chaining/bounce */
       -webkit-overflow-scrolling: touch;
       touch-action: pan-y;
     }
 
-    /* Sticky canvas: stays pinned while the spacer provides scroll distance */
-    #wrap {
-      position: sticky;
-      top: 0;
-      height: 100vh;              /* keep the viewer in view while we scroll */
-    }
+    /* Keep the viewer visible while the page scrolls past a spacer */
+    #wrap { position: sticky; top: 0; height: 100vh; }
 
-    /* Viewer fills its wrapper */
-    spline-viewer {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
+    spline-viewer { display: block; width: 100%; height: 100%; }
 
-    /* The only flow-height provider */
+    /* The ONLY flow-height provider in embed mode */
     #ghost-scroll { width: 1px; height: 0; }
   </style>
 </head>
 <body>
   <div id="wrap">
-    <!-- Use valid events-target values -->
     <spline-viewer
       url="./scene.splinecode"
-      events-target="global"
+      events-target="global"   <!-- valid values: local | global -->
       loading="eager"
     ></spline-viewer>
   </div>
 
-  <!-- Spacer that defines the exact scroll budget in EMBED mode -->
+  <!-- precise scroll budget lives OUTSIDE the sticky viewer -->
   <div id="ghost-scroll" aria-hidden="true"></div>
 
   <script>
@@ -61,17 +51,15 @@
     if (isEmbedded) {
       document.documentElement.classList.add("embed");
       document.body.classList.add("embed");
-    }
 
-    // Calibrated scroll budget (pixels); Spline's Scroll Event uses px
-    const userPx   = Number(qs.get("scrollpx"));
-    const isPhone  = /Mobi|Android/i.test(navigator.userAgent);
-    const fallback = isPhone ? 900 : 1200;   // tune once, then pass &scrollpx when needed
-    const scrollBudgetPx = Number.isFinite(userPx) ? userPx : fallback;
+      // Parse & apply scroll budget in pixels for Spline Scroll Event
+      const userPx = Number(qs.get("scrollpx"));
+      const isPhone = /Mobi|Android/i.test(navigator.userAgent);
+      const fallback = isPhone ? 900 : 1200;  // adjust once if needed
+      const px = Number.isFinite(userPx) ? userPx : fallback;
 
-    if (isEmbedded) {
       const ghost = document.getElementById("ghost-scroll");
-      ghost.style.height = Math.max(0, scrollBudgetPx) + "px";
+      ghost.style.height = Math.max(0, px) + "px";
     }
   </script>
 </body>
