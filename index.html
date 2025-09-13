@@ -4,136 +4,56 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Mojave UFO</title>
-
-  <!-- Use CDN first; vendor later if desired -->
-  <script type="module" src="https://unpkg.com/@splinetool/viewer@1.10.57/build/spline-viewer.js"></script>
-
+  <!-- Self-hosted viewer -->
+  <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
   <style>
-    html, body { margin: 0; height: 100%; background: transparent; }
-    /* Allow internal scroll in EMBED mode; not fixed, no overflow:hidden */
-    html.embed, body.embed { overflow: auto; overscroll-behavior: contain; }
-    /* Hide scrollbar but allow scrolling */
-    body { scrollbar-width: none; }
-    body::-webkit-scrollbar { display: none; }
-    #wrap { position: absolute; inset: 0; }
-    #ghost-scroll { width: 1px; height: 0; }
-    spline-viewer, canvas { width: 100% !important; height: 100% !important; display: block; background: transparent !important; }
-
-    /* Internal scroll fallback (enabled dynamically if no parent messages arrive) */
-    html.internal #wrap { position: sticky; top: 0; height: 100vh; }
-    html.internal body { overflow: auto; }
-    
-    /* Mobile vh fix */
-    :root { --vh: 1vh; }
+    html, body { margin: 0; padding: 0; background: transparent; }
+    /* Pin the viewer; let the PAGE (not a full-screen absolute div) be the scroller */
+    #pin { position: sticky; top: 0; height: 100vh; }
+    spline-viewer { display: block; width: 100%; height: 100%; }
+    /* Real scroll height lives HERE (outside the pinned container) */
+    #spacer { height: 2000px; }
   </style>
 </head>
 <body>
-  <div id="wrap">
-    <spline-viewer
-      id="sv"
-      url="./scene.splinecode"
-      events-target="global"
-      loading-anim="true"
-      style="display:block;width:100%;height:100%"
-    ></spline-viewer>
+  <div id="pin">
+    <!-- Listen on the iframe window -->
+    <spline-viewer id="sv" url="./scene.splinecode" events-target="global" loading-anim="true"></spline-viewer>
   </div>
-  <div id="ghost-scroll" aria-hidden="true"></div>
+  <!-- Must be OUTSIDE #pin so it affects document height -->
+  <div id="spacer" aria-hidden="true"></div>
 
   <script>
-    // --- EMBED TOGGLE ---
-    const qs = new URLSearchParams(location.search);
-    const isExternal = qs.get("external") === "1";     // your Framer link uses this
-    if (isExternal) {
-      document.documentElement.classList.add("embed");
-      document.body.classList.add("embed");
-    }
+    (function () {
+      const params   = new URLSearchParams(location.search);
+      const scrollpx = Math.max(0, parseInt(params.get('scrollpx') || '2000', 10));
+      const external = params.has('external'); // ?external=1 turns on bridge
 
-    // --- MOBILE 100vh FIX (iOS toolbars) ---
-    function setVh() {
-      document.documentElement.style.setProperty("--vh", window.innerHeight * 0.01 + "px");
-    }
-    setVh(); 
-    addEventListener("resize", setVh); 
-    addEventListener("orientationchange", setVh);
+      // Make the iframe page tall so programmatic scroll means something
+      const spacer = document.getElementById('spacer');
+      if (spacer) spacer.style.height = scrollpx + 'px';
 
-    // --- CALIBRATED SCROLL BUDGET ---
-    // Pass a pixel length from Framer (e.g., &scrollpx=1200) or fall back to sane defaults.
-    const userPx = Number(qs.get("scrollpx"));
-    const isPhone = /Mobi|Android/i.test(navigator.userAgent);
-    // Pick a tight budget; tweak once against your Spline "End After" values
-    const scrollBudgetPx = Number.isFinite(userPx) ? userPx : (isPhone ? 900 : 1200);
-
-    if (isExternal) {
-      const ghost = document.getElementById("ghost-scroll");
-      if (ghost) {
-        ghost.style.height = Math.max(0, scrollBudgetPx) + "px"; // <-- precise, not vh or 4000px
+      // If parent is driving progress, listen for its messages and set our scrollTop
+      if (external) {
+        const doc = document.scrollingElement || document.documentElement;
+        const sv  = document.getElementById('sv');
+        window.addEventListener('message', (e) => {
+          const d = e && e.data || {};
+          if (d.type !== 'SCROLL_PROGRESS') return;
+          const p   = Math.max(0, Math.min(1, Number(d.progress) || 0));
+          const max = Math.max(0, doc.scrollHeight - window.innerHeight);
+          doc.scrollTop = p * max;
+          // Nudge Spline listeners; also scrub timeline so timeline-only scenes sync
+          try { window.dispatchEvent(new Event('scroll')); } catch {}
+          try { const dur = Number(sv?.duration || 1); sv.setTime?.(p * dur); sv.play?.(); } catch {}
+        }, { passive: true });
       }
-    }
 
-    // --- FALLBACK FOR NON-EMBED MODE ---
-    const sv = document.getElementById('sv');
-    const ghost = document.getElementById('ghost-scroll');
-    const htmlEl = document.documentElement;
-    const root = document.scrollingElement || document.documentElement;
-
-    let internal = false;
-    let gotParentMsg = false;
-    let fallbackTimer = 0;
-
-    function activateInternal() {
-      if (internal || isExternal) return; // Don't activate if embed mode
-      internal = true;
-      htmlEl.classList.add('internal');
-      if (ghost && !isExternal) {
-        ghost.style.display = 'block';
-        // Use same calibrated budget for internal mode
-        ghost.style.height = scrollBudgetPx + 'px';
-      }
-      // Drive timeline from this page's own scroll
-      const computeT = () => {
-        const max = Math.max(1, root.scrollHeight - root.clientHeight);
-        const top = root.scrollTop || 0;
-        return Math.max(0, Math.min(1, top / max));
-      };
-      const onScroll = () => {
-        const t = computeT();
-        try { const dur = Number(sv?.duration || 1); sv.setTime?.(t * dur); sv.play?.(); } catch {}
-      };
-      addEventListener('scroll', onScroll, { passive: true });
-      onScroll();
-    }
-
-    // Play when loaded; ensure t=0 for a clean first frame
-    sv?.addEventListener?.('load-complete', () => {
-      try { sv.play?.(); sv.setTime?.(0); } catch {}
-    });
-
-    // Auto-activate internal mode if no parent messages and not in embed mode
-    if (!isExternal) {
-      fallbackTimer = window.setTimeout(() => {
-        if (!gotParentMsg) activateInternal();
-      }, 900);
-    }
-
-    // Parent-driven bridge: accept progress 0..1 and translate to this document's scrollTop.
-    // Also scrub the viewer's timeline so timeline-only scenes sync too.
-    if (isExternal) {
-      window.addEventListener('message', (e) => {
-        const d = e?.data || {};
-        if (d.type !== 'SCROLL_PROGRESS') return;
-        const p = Math.max(0, Math.min(1, Number(d.progress) || 0));
-        const max = Math.max(0, (document.scrollingElement || document.documentElement).scrollHeight - window.innerHeight);
-        try { (document.scrollingElement || document.documentElement).scrollTo(0, p * max); } catch {}
-        try { const dur = Number(sv?.duration || 1); sv.setTime?.(p * dur); sv.play?.(); } catch {}
-      }, { passive: true });
-    }
-
-    // Safety: if viewer never registers, script didn't load
-    setTimeout(() => {
-      if (!customElements.get('spline-viewer')) {
-        console.warn('spline-viewer not registered — check <script src> or CSP');
-      }
-    }, 4000);
+      // Safety: if viewer never registers, the script didn't load
+      setTimeout(() => {
+        if (!customElements.get('spline-viewer')) console.warn('spline-viewer not registered — check script path or CSP');
+      }, 4000);
+    })();
   </script>
 </body>
 </html>
