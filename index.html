@@ -13,21 +13,26 @@
     /* Base */
     html, body { margin: 0; height: 100%; background: transparent; }
 
-    /* Sticky viewer keeps the scene in view while the document provides scroll */
+    /* Default: sticky viewer; document provides scroll in scroll-driven mode */
     #wrap { position: sticky; top: 0; height: 100svh; }
     spline-viewer { display: block; width: 100%; height: 100%; }
 
-    /* The ONLY flow-height source when we enable internal (iframe) scroll */
+    /* The ONLY flow-height in scroll-driven mode */
     #ghost-scroll { width: 1px; height: 0; }
 
-    /* ---------- PASSTHROUGH MODE (no internal scroll) ---------- */
-    /* When .embed-no-scroll is on <html>, the iframe's document won't scroll. */
-    html.embed-no-scroll, body.embed-no-scroll {
-      overflow: hidden;
-      overscroll-behavior: none;
+    /* ---------- Passthrough (no internal iframe scroll) ---------- */
+    /* Do NOT use overscroll-behavior: contain here; it blocks parent scroll chaining */
+    html.embed-pass, body.embed-pass { overflow: hidden; }
+    html.embed-pass #wrap { position: fixed; inset: 0; height: auto; }
+
+    /* ---------- Scroll-driven (internal iframe scroll) ---------- */
+    /* Allow scroll and allow chaining to parent */
+    html.embed-scroll, body.embed-scroll {
+      overflow-y: auto;
+      overscroll-behavior: auto; /* allow chaining, not 'contain' */
+      -webkit-overflow-scrolling: touch;
+      touch-action: pan-y;
     }
-    /* In this mode the viewer is pinned absolutely so no flow height exists. */
-    html.embed-no-scroll #wrap { position: fixed; inset: 0; height: auto; }
   </style>
 </head>
 <body>
@@ -44,33 +49,34 @@
   <script>
     (function () {
       const qs = new URLSearchParams(location.search);
-      const isEmbedded = qs.get("external") === "1" || (function(){ try { return window.self !== window.top } catch { return true } })();
-
-      // “scrollpx” present => scroll-driven mode; otherwise passthrough mode.
-      const userPx = Number(qs.get("scrollpx"));
+      const isEmbedded = qs.get('external') === '1' || (function(){ try { return window.self !== window.top } catch { return true } })();
+      const userPx = Number(qs.get('scrollpx'));
       const wantsScrollBudget = Number.isFinite(userPx);
 
       if (isEmbedded) {
-        // Clean up any previous inline locks
-        document.documentElement.style.overflow = "";
-        document.body.style.overflow = "";
+        // Clear any legacy inline locks
+        document.documentElement.style.overflow = '';
+        document.body.style.overflow = '';
 
         if (wantsScrollBudget) {
-          // ---------- SCROLL-DRIVEN MODE ----------
-          // Allow the iframe document to scroll and give it a precise pixel budget.
+          // Scroll-driven mode
+          document.documentElement.classList.remove('embed-pass');
+          document.body.classList.remove('embed-pass');
+          document.documentElement.classList.add('embed-scroll');
+          document.body.classList.add('embed-scroll');
+
           const isPhone = /Mobi|Android/i.test(navigator.userAgent);
           const px = Math.max(0, userPx || (isPhone ? 900 : 1200));
-          const ghost = document.getElementById("ghost-scroll");
-          if (ghost) ghost.style.height = px + "px";
-          // Sticky layout on #wrap remains active by default.
+          const ghost = document.getElementById('ghost-scroll');
+          if (ghost) ghost.style.height = px + 'px';
         } else {
-          // ---------- PASSTHROUGH MODE (NO TRAP) ----------
-          // No internal scroll; let the parent page (Framer) scroll under the cursor.
-          document.documentElement.classList.add("embed-no-scroll");
-          document.body.classList.add("embed-no-scroll");
-          // Safety: zero out any spacer height
-          const ghost = document.getElementById("ghost-scroll");
-          if (ghost) ghost.style.height = "0px";
+          // Passthrough mode
+          document.documentElement.classList.remove('embed-scroll');
+          document.body.classList.remove('embed-scroll');
+          document.documentElement.classList.add('embed-pass');
+          document.body.classList.add('embed-pass');
+          const ghost = document.getElementById('ghost-scroll');
+          if (ghost) ghost.style.height = '0px';
         }
       }
 
@@ -84,4 +90,3 @@
   </script>
 </body>
 </html>
-
