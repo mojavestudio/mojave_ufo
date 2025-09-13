@@ -9,145 +9,118 @@
   <script type="module" src="https://unpkg.com/@splinetool/viewer@1.10.57/build/spline-viewer.js"></script>
 
   <style>
-    /* Full-bleed viewer. By default the child won't capture scroll (parent controls it). */
-    html, body { height: 100%; margin: 0; background: transparent; }
-    /* Allow programmatic scroll; hide scrollbar so the child doesn't feel scrollable */
-    body { overflow: auto; scrollbar-width: none; }
+    html, body { margin: 0; height: 100%; background: transparent; }
+    /* Allow internal scroll in EMBED mode; not fixed, no overflow:hidden */
+    html.embed, body.embed { overflow: auto; overscroll-behavior: contain; }
+    /* Hide scrollbar but allow scrolling */
+    body { scrollbar-width: none; }
     body::-webkit-scrollbar { display: none; }
-    #wrap { position: fixed; inset: 0; }
+    #wrap { position: absolute; inset: 0; }
+    #ghost-scroll { width: 1px; height: 0; }
     spline-viewer, canvas { width: 100% !important; height: 100% !important; display: block; background: transparent !important; }
 
     /* Internal scroll fallback (enabled dynamically if no parent messages arrive) */
     html.internal #wrap { position: sticky; top: 0; height: 100vh; }
+    html.internal body { overflow: auto; }
     
-    /* External/embedded mode: prevent any internal scrolling */
-    html.is-external, body.is-external { overflow: hidden !important; }
-    html.is-external #wrap { position: fixed; inset: 0; }
+    /* Mobile vh fix */
+    :root { --vh: 1vh; }
   </style>
 </head>
 <body>
   <div id="wrap">
-    <spline-viewer id="sv" url="./scene.splinecode" events-target="window" loading-anim="true"></spline-viewer>
+    <spline-viewer
+      id="sv"
+      url="./scene.splinecode"
+      events-target="global"
+      loading-anim="true"
+      style="display:block;width:100%;height:100%"
+    ></spline-viewer>
   </div>
-  <!-- Invisible scroller to provide scrollHeight for Spline Scroll Events -->
-  <div id="ghost-scroll" style="height:200vh; visibility:hidden; pointer-events:none; display:none;"></div>
+  <div id="ghost-scroll" aria-hidden="true"></div>
 
   <script>
-    (function () {
-      const sv = document.getElementById('sv');
-      const ghost = document.getElementById('ghost-scroll');
-      const htmlEl = document.documentElement;
-      const root = document.scrollingElement || document.documentElement;
+    // --- EMBED TOGGLE ---
+    const qs = new URLSearchParams(location.search);
+    const isExternal = qs.get("external") === "1";     // your Framer link uses this
+    if (isExternal) {
+      document.documentElement.classList.add("embed");
+      document.body.classList.add("embed");
+    }
 
-      // Query param overrides
-      const params = new URLSearchParams(location.search);
-      const forceInternal = params.get('internal') === '1';
-      const forceExternal = params.get('external') === '1';
-      const isExternal = params.has('external'); // Check for any external param (including ?external=1)
+    // --- MOBILE 100vh FIX (iOS toolbars) ---
+    function setVh() {
+      document.documentElement.style.setProperty("--vh", window.innerHeight * 0.01 + "px");
+    }
+    setVh(); 
+    addEventListener("resize", setVh); 
+    addEventListener("orientationchange", setVh);
 
-      let internal = !!forceInternal;
-      let gotParentMsg = false;
-      let fallbackTimer = 0;
+    // --- CALIBRATED SCROLL BUDGET ---
+    // Pass a pixel length from Framer (e.g., &scrollpx=1200) or fall back to sane defaults.
+    const userPx = Number(qs.get("scrollpx"));
+    const isPhone = /Mobi|Android/i.test(navigator.userAgent);
+    // Pick a tight budget; tweak once against your Spline "End After" values
+    const scrollBudgetPx = Number.isFinite(userPx) ? userPx : (isPhone ? 900 : 1200);
 
-      // When embedded (?external): kill internal scrolling and ghost height
-      if (isExternal) {
-        htmlEl.classList.add('is-external');
-        document.body.classList.add('is-external');
-        htmlEl.style.overflow = 'hidden';
-        document.body.style.overflow = 'hidden';
-        if (ghost) {
-          ghost.style.display = 'none';   // Don't enable ghost scroll
-          ghost.style.height = '0px';     // Ensure no height
-        }
-      } else {
-        // Only setup ghost scroll when NOT embedded
-        if (ghost) {
-          ghost.style.display = 'block';
-          // Set initial dynamic height
-          const scrollDistance = Math.max(window.innerHeight * 1.5, 1200); // 1.5x viewport or minimum 1200px
-          ghost.style.height = scrollDistance + 'px';
-        }
+    if (isExternal) {
+      const ghost = document.getElementById("ghost-scroll");
+      if (ghost) {
+        ghost.style.height = Math.max(0, scrollBudgetPx) + "px"; // <-- precise, not vh or 4000px
       }
+    }
 
-      function activateInternal() {
-        if (internal || isExternal) return; // Guard: don't activate internal mode when embedded
-        internal = true;
-        htmlEl.classList.add('internal');
-        if (ghost) {
-          ghost.style.display = 'block';
-          // Dynamically set ghost height based on viewport and desired scroll distance
-          const scrollDistance = Math.max(window.innerHeight * 0.5, 600); // 0.5x viewport or minimum 600px
-          ghost.style.height = scrollDistance + 'px';
-        }
-        // Drive timeline from this page's own scroll, so both modes behave similarly
-        const computeT = () => {
-          const max = Math.max(1, root.scrollHeight - root.clientHeight);
-          const top = root.scrollTop || 0;
-          return Math.max(0, Math.min(1, top / max));
-        };
-        const onScroll = () => {
-          const t = computeT();
-          try { const dur = Number(sv?.duration || 1); sv.setTime?.(t * dur); sv.play?.(); } catch {}
-        };
-        addEventListener('scroll', onScroll, { passive: true });
-        onScroll();
+    // --- FALLBACK FOR NON-EMBED MODE ---
+    const sv = document.getElementById('sv');
+    const ghost = document.getElementById('ghost-scroll');
+    const htmlEl = document.documentElement;
+    const root = document.scrollingElement || document.documentElement;
+
+    let internal = false;
+    let gotParentMsg = false;
+    let fallbackTimer = 0;
+
+    function activateInternal() {
+      if (internal || isExternal) return; // Don't activate if embed mode
+      internal = true;
+      htmlEl.classList.add('internal');
+      if (ghost && !isExternal) {
+        ghost.style.display = 'block';
+        // Use same calibrated budget for internal mode
+        ghost.style.height = scrollBudgetPx + 'px';
       }
+      // Drive timeline from this page's own scroll
+      const computeT = () => {
+        const max = Math.max(1, root.scrollHeight - root.clientHeight);
+        const top = root.scrollTop || 0;
+        return Math.max(0, Math.min(1, top / max));
+      };
+      const onScroll = () => {
+        const t = computeT();
+        try { const dur = Number(sv?.duration || 1); sv.setTime?.(t * dur); sv.play?.(); } catch {}
+      };
+      addEventListener('scroll', onScroll, { passive: true });
+      onScroll();
+    }
 
-      // Play when loaded; ensure t=0 for a clean first frame
-      sv?.addEventListener?.('load-complete', () => {
-        try { sv.play?.(); sv.setTime?.(0); } catch {}
-      });
+    // Play when loaded; ensure t=0 for a clean first frame
+    sv?.addEventListener?.('load-complete', () => {
+      try { sv.play?.(); sv.setTime?.(0); } catch {}
+    });
 
-      // If not forced external/internal, choose based on whether parent sends messages soon
-      if (!forceInternal && !forceExternal) {
-        fallbackTimer = window.setTimeout(() => {
-          if (!gotParentMsg) activateInternal();
-        }, 900);
+    // Auto-activate internal mode if no parent messages and not in embed mode
+    if (!isExternal) {
+      fallbackTimer = window.setTimeout(() => {
+        if (!gotParentMsg) activateInternal();
+      }, 900);
+    }
+
+    // Safety: if viewer never registers, script didn't load
+    setTimeout(() => {
+      if (!customElements.get('spline-viewer')) {
+        console.warn('spline-viewer not registered — check <script src> or CSP');
       }
-      if (forceInternal) activateInternal();
-
-      // Receive parent scroll messages
-      addEventListener('message', (e) => {
-        const d = e?.data || {};
-        if (d.type === 'FRAMER_SCROLL_INIT' || d.type === 'FRAMER_SCROLL') {
-          gotParentMsg = true;
-          if (fallbackTimer) { window.clearTimeout(fallbackTimer); fallbackTimer = 0; }
-          // Ensure external mode if parent is driving (but respect ?external param)
-          if (!forceInternal && internal && !isExternal) { 
-            internal = false; 
-            htmlEl.classList.remove('internal'); 
-            if (ghost) {
-              ghost.style.display = 'block';
-              // Maintain consistent ghost height in external mode
-              const scrollDistance = Math.max(window.innerHeight * 0.5, 600);
-              ghost.style.height = scrollDistance + 'px';
-            }
-          }
-        }
-        if (d.type === 'FRAMER_SCROLL_INIT') {
-          try { sv.pause?.(); sv.setTime?.(0); } catch {}
-          return;
-        }
-        if (d.type === 'FRAMER_SCROLL') {
-          const t = Math.max(0, Math.min(1, Number(d.t) || 0));
-          try { const dur = Number(sv?.duration || 1); sv.setTime?.(t * dur); sv.play?.(); } catch {}
-          // Only emulate internal scroll while in external mode (so Scroll Events fire)
-          if (!internal) {
-            try {
-              const max = Math.max(1, root.scrollHeight - root.clientHeight);
-              root.scrollTo(0, t * max);
-            } catch {}
-          }
-        }
-      });
-
-      // Safety: if viewer never registers, script didn’t load
-      setTimeout(() => {
-        if (!customElements.get('spline-viewer')) {
-          console.warn('spline-viewer not registered — check <script src> or CSP');
-        }
-      }, 4000);
-    })();
+    }, 4000);
   </script>
 </body>
 </html>
