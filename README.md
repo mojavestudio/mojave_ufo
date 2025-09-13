@@ -21,28 +21,93 @@ This repo can also serve a standalone Spline scene via GitHub Pages and be embed
   - `process.wasm`
 - An `index.html` is already included at the repo root and references `./scene.splinecode` using the Spline Viewer web component.
 
-`index.html` content for reference:
+`index.html` content (fluid + sticky, ready for Framer embed):
 
 ```html
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Spline Scene</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+    <title>Mojave UFO</title>
     <!-- Load the Spline Viewer web component (self-hosted, pinned) -->
     <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
     <style>
       html, body { margin: 0; height: 100%; background: transparent; }
-      #wrap { position: absolute; inset: 0; }
+
+      /* Viewport-sized, not parent-sized */
+      #outer  { position: relative; width: 100vw; }
+      #sticky { position: sticky; top: 0; width: 100vw; height: 100svh; }
+
+      /* Kill any max-width on the web component and force it fluid */
+      spline-viewer{
+        width:100vw !important;
+        height:100svh !important;
+        max-width:none !important;
+        min-width:0 !important;
+        display:block !important;
+        box-sizing:border-box !important;
+      }
+      /* If your viewer build exposes parts, keep them fluid too (harmless if not) */
+      spline-viewer::part(container),
+      spline-viewer::part(canvas){
+        width:100% !important;
+        height:100% !important;
+        max-width:none !important;
+      }
     </style>
   </head>
   <body>
-    <div id="wrap">
-      <spline-viewer url="./scene.splinecode" style="width:100%; height:100%"></spline-viewer>
-    </div>
+    <section id="outer">
+      <div id="sticky">
+        <spline-viewer id="viewer" url="./scene.splinecode" events-target="local"></spline-viewer>
+      </div>
+    </section>
+
+    <!-- Scroll sync & fallback sizing -->
+    <script type="module">
+      const qp    = new URLSearchParams(location.search)
+      const outer = document.getElementById('outer')
+
+      function applyFallbackHeight(){
+        const px = parseInt(qp.get('scrollpx') || '0', 10)
+        if (px) {
+          outer.style.height = px + 'px'
+        } else {
+          const vh = parseFloat(qp.get('scrollvh') || '170') // harmless default
+          const unit = (window.visualViewport?.height || window.innerHeight) / 100
+          outer.style.height = (vh * unit) + 'px'
+        }
+      }
+      applyFallbackHeight()
+
+      let rangePx = null
+
+      // Parent → child sync (when embedded with ?external=1)
+      if (qp.get('external') === '1') {
+        window.addEventListener('message', (e) => {
+          const d = e?.data
+          if (!d) return
+          if (d.type === 'SCROLL_RANGE' && Number.isFinite(d.rangePx)) {
+            rangePx = Math.max(0, d.rangePx)
+            outer.style.height = (rangePx + window.innerHeight) + 'px'
+          }
+          if (d.type === 'SCROLL_PROGRESS' && Number.isFinite(d.progress)) {
+            const max = document.documentElement.scrollHeight - window.innerHeight
+            document.documentElement.scrollTop = d.progress * Math.max(0, max)
+          }
+        })
+
+        const reapply = () => {
+          if (rangePx != null) outer.style.height = (rangePx + window.innerHeight) + 'px'
+        }
+        window.visualViewport?.addEventListener('resize', reapply)
+        window.addEventListener('orientationchange', reapply)
+        window.addEventListener('resize', reapply)
+      }
+    </script>
   </body>
-</html>
+  </html>
 ```
 
 > Tip: `.nojekyll` prevents Jekyll from interfering with static assets (helps with `.wasm`).
@@ -112,6 +177,43 @@ Usage in Framer:
 - Scroll animation must be authored in Spline (Scroll Event or timeline). Framer is just rendering the scene.
 - GitHub Pages is free; no paid hosting required.
 - You can extend the component with more Property Controls later (e.g., background, sticky height).
+
+### Framer parent CSS (full‑bleed embed)
+In Framer Project Settings → Code → Head (start), add:
+
+```html
+<style>
+  /* Target only this repo's embed */
+  iframe[src*="mojavestudio.github.io/mojave_ufo"]{
+    width:100vw !important;
+    max-width:100vw !important;
+    min-width:100vw !important;
+    height:100svh !important;
+    display:block !important;
+    position:relative !important;
+    left:50% !important;
+    transform:translateX(-50%) !important;
+  }
+  .framer-embed-wrapper, .framer-embed-wrapper * { overflow: visible !important; }
+  /* Optional: wrap the Embed in a frame sized to 100vw x 100svh with X: calc(50% - 50vw), Clip OFF */
+ </style>
+```
+
+Embed URL example:
+```
+https://mojavestudio.github.io/mojave_ufo/?external=1&v=7
+```
+
+### Quick verification
+- In the parent page console, check the iframe spans the viewport:
+  ```js
+  const r = document.querySelector('iframe[src*="mojavestudio.github.io/mojave_ufo"]').getBoundingClientRect();
+  ({ iframeWidth: r.width, viewport: innerWidth })
+  ```
+- In the iframe tab console, check the web component width equals the viewport:
+  ```js
+  ({ innerWidth, cssWidth: getComputedStyle(document.querySelector('spline-viewer')).width })
+  ```
 
 ### Troubleshooting
 - If `process.wasm` fails to load, ensure it’s at the repo root and served with `application/wasm` (GitHub Pages usually handles this automatically).
