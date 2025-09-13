@@ -13,6 +13,8 @@
   /* Allow the document to grow and scroll */
   html, body { margin: 0; min-height: 100%; background: transparent; }
 
+  spline-viewer { display: block; touch-action: pan-y; }
+
   /* Use sticky instead of absolute so the page can scroll naturally */
   #wrap { position: sticky; top: 0; height: 100vh; }
 
@@ -32,7 +34,7 @@
     ></spline-viewer>
   </div>
 <!-- Invisible scroller to provide scrollHeight for Spline Scroll Events -->
-<div id="ghost-scroll" style="visibility:hidden; pointer-events:none; display:none;"></div>
+<div id="ghost-scroll" style="height:200vh; visibility:hidden; pointer-events:none;"></div>
 
 <script>
 (function () {
