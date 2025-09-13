@@ -38,62 +38,75 @@
 
 <script>
 (() => {
-  const sv     = document.getElementById('sv');                 // <spline-viewer id="sv">
+  const sv     = document.getElementById('sv');
   const root   = document.scrollingElement || document.documentElement;
-  const ghost  = document.getElementById('ghost-scroll');       // <div id="ghost-scroll">
+  const ghost  = document.getElementById('ghost-scroll');
 
-  const q      = new URLSearchParams(location.search);
+  const q        = new URLSearchParams(location.search);
   const external = q.get('external') === '1' || q.get('external') === 'true';
 
-  // ===== Config =====
   // How long should the scroll be? Use ?scrollvh=110 or ?scrollpx=900
   const scrollPx = (() => {
     const px = parseFloat(q.get('scrollpx') || '');
     const vh = parseFloat(q.get('scrollvh') || '');
     if (!Number.isNaN(px) && px > 0) return px;
     if (!Number.isNaN(vh) && vh > 0) return Math.round(window.innerHeight * (vh / 100));
-    return Math.round(window.innerHeight * 1.2); // sensible default ~1.2 screens
+    return Math.round(window.innerHeight * 1.2); // default ~1.2 screens
   })();
 
-  // Where does the animation visually finish on the 0..1 timeline?
-  // Example: if your Spline Scroll event stops changing after ~68% => ?end=0.68
+  // Visual end of motion on the 0..1 timeline (e.g., ?end=0.68)
   const end = (() => {
     const e = parseFloat(q.get('end') || '');
-    return Number.isFinite(e) ? Math.min(1, Math.max(0.05, e)) : 1; // default = full
+    return Number.isFinite(e) ? Math.min(1, Math.max(0.05, e)) : 1;
   })();
 
+  // Optional: snap the document to end (trim spacer) once bottom is reached
+  const snap = q.get('snap') === '1' || q.get('snap') === 'true';
+
   function setGhostHeight(px) {
-    ghost.style.display = 'block';              // MUST be visible, not display:none
+    ghost.style.display = 'block';
     ghost.style.height  = Math.max(1, px) + 'px';
   }
 
   setGhostHeight(scrollPx);
-  window.addEventListener('resize', () => setGhostHeight(scrollPx));
 
   let internal = !external;
-  let locked   = false;
+  let locked   = false;   // when true, spacer has been trimmed
+  let lockedAt = 0;
 
-  function setProgress(t) {
+  function setProgressFromP(p) {
+    // Scale progress by `end` so visuals finish at page bottom without dead space
+    const t = Math.min(1, Math.max(0, p * end));
     try { sv.setTime?.(t); } catch {}
-    if (!locked && t >= end) {
-      // Trim trailing scroll so the page ends right when visuals finish
+
+    if (snap && !locked && p >= 1) {
       locked = true;
-      setGhostHeight(root.scrollTop + 1);
+      lockedAt = root.scrollTop;
+      setGhostHeight(lockedAt + 1);
     }
   }
 
-  function computeT() {
+  function compute() {
     const max = Math.max(1, root.scrollHeight - root.clientHeight);
-    const t   = Math.min(1, Math.max(0, root.scrollTop / max));
-    setProgress(t);
+    const p   = Math.min(1, Math.max(0, root.scrollTop / max));
+
+    // Allow undoing the snap by scrolling up
+    if (locked && root.scrollTop < lockedAt - 2) {
+      locked = false;
+      setGhostHeight(scrollPx);
+    }
+
+    setProgressFromP(p);
   }
 
-  // Internal drive
-  window.addEventListener('scroll', () => { if (internal) computeT(); }, { passive: true });
-  window.addEventListener('resize', () => { if (internal) computeT(); });
-  computeT();
+  window.addEventListener('scroll', () => { if (internal) compute(); }, { passive: true });
+  window.addEventListener('resize', () => {
+    if (!locked) setGhostHeight(scrollPx);
+    if (internal) compute();
+  });
+  compute();
 
-  // External (parent-driven) still supported
+  // External (parent-driven) stays intact; we don't scale external progress
   window.addEventListener('message', (e) => {
     const d = e?.data || {};
     if (!d || typeof d !== 'object') return;
@@ -101,7 +114,12 @@
     if (d.type === 'FRAMER_SCROLL_PROGRESS' && typeof d.progress === 'number') {
       internal = false;
       const p = Math.min(1, Math.max(0, d.progress));
-      setProgress(p);
+      try { sv.setTime?.(p); } catch {}
+      if (snap && !locked && p >= 1) {
+        locked = true;
+        lockedAt = root.scrollTop;
+        setGhostHeight(lockedAt + 1);
+      }
     }
   });
 })();
