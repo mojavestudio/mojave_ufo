@@ -30,25 +30,44 @@
   </section>
 
   <script type="module">
-    const qp = new URLSearchParams(location.search);
+    const qp    = new URLSearchParams(location.search);
     const outer = document.getElementById('outer');
 
-    // Fallback: compute px height if svh unsupported or to match ?scrollvh exactly
-    function applyHeight() {
-      const vh = parseFloat(qp.get('scrollvh') || '170');
+    // Fallback height if parent hasn't spoken yet (rare)
+    function fallbackHeight() {
       const px = parseInt(qp.get('scrollpx') || '0', 10);
-      if (px) {
-        outer.style.height = px + 'px';
-        return;
+      const vh = parseFloat(qp.get('scrollvh') || '170'); // only used as a fallback
+      if (px) outer.style.height = px + 'px';
+      else {
+        const unit = (window.visualViewport?.height || window.innerHeight) / 100;
+        outer.style.height = (vh * unit) + 'px';
       }
-      // Use visualViewport for more accurate mobile vh
-      const unit = (window.visualViewport?.height || window.innerHeight) / 100;
-      outer.style.height = (vh * unit) + 'px';
     }
+    fallbackHeight();
 
-    applyHeight();
-    window.visualViewport?.addEventListener('resize', applyHeight);
-    window.addEventListener('orientationchange', applyHeight);
+    let rangePx = null;
+
+    if (qp.get('external') === '1') {
+      window.addEventListener('message', (e) => {
+        const d = e?.data;
+        if (!d) return;
+
+        if (d.type === 'SCROLL_RANGE' && Number.isFinite(d.rangePx)) {
+          rangePx = Math.max(0, d.rangePx);
+          outer.style.height = (rangePx + window.innerHeight) + 'px'; // make internal range match parent
+        }
+
+        if (d.type === 'SCROLL_PROGRESS' && Number.isFinite(d.progress)) {
+          const max = document.documentElement.scrollHeight - window.innerHeight;
+          document.documentElement.scrollTop = d.progress * Math.max(0, max);
+        }
+      });
+
+      // Keep sizes aligned if the child viewport changes (mobile URL bar, rotation)
+      window.addEventListener('resize', () => {
+        if (rangePx != null) outer.style.height = (rangePx + window.innerHeight) + 'px';
+      });
+    }
   </script>
 </body>
 </html>
