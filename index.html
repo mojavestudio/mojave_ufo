@@ -38,84 +38,61 @@
 
 <script>
 (function () {
-  const sv    = document.getElementById('sv');
-  const html  = document.documentElement;
-  const root  = document.scrollingElement || html;     // <-- cross-browser
-  const ghost = document.getElementById('ghost-scroll');
+  const sv     = document.getElementById('sv');
+  const html   = document.documentElement;
+  const root   = document.scrollingElement || html;
+  const ghost  = document.getElementById('ghost-scroll');
 
-  // Query flags
   const params   = new URLSearchParams(location.search);
   const external = params.get('external') === '1' || params.get('external') === 'true';
 
-  // Mode state
-  let internal       = !external;   // default to internal when no external driver
-  let gotParentMsg   = false;
-  let fallbackTimer  = 0;
-
-  // Ensure spacer exists + dynamic height
-  function setGhostHeight() {
-    if (!ghost) return;
-    ghost.style.display = 'block';
-    const scrollDistance = Math.max(window.innerHeight * 1.5, 1200); // 1.5×vh or 1200px
-    ghost.style.height = scrollDistance + 'px';
+  // --- 1) Configurable scroll distance ---
+  // Use ?scrollvh=120 (vh units) or ?scrollpx=900 (px). Defaults to 120vh if nothing is given.
+  function targetScrollPx() {
+    const px  = parseFloat(params.get('scrollpx') || '');
+    const vh  = parseFloat(params.get('scrollvh') || '');
+    if (!Number.isNaN(px) && px > 0) return px;
+    if (!Number.isNaN(vh) && vh > 0) return Math.round(window.innerHeight * (vh / 100));
+    return Math.round(window.innerHeight * 1.2); // default: ~1.2 screens
   }
 
-  setGhostHeight();
-  window.addEventListener('resize', setGhostHeight);
+  function setGhostHeight(px) {
+    ghost.style.height = Math.max(1, px) + 'px';
+    ghost.style.display = 'block';
+  }
+
+  // Initial spacer (you can tweak with ?scrollvh / ?scrollpx)
+  setGhostHeight(targetScrollPx());
+  window.addEventListener('resize', () => setGhostHeight(targetScrollPx()));
+
+  // --- 2) Drive Spline from scroll + auto-lock at the end ---
+  let internal = !external;    // default to internal if no parent driver
+  let locked   = false;        // becomes true once we reach t == 1
 
   function computeT() {
-    // total scrollable distance
     const max = Math.max(1, root.scrollHeight - root.clientHeight);
     const t   = Math.min(1, Math.max(0, root.scrollTop / max));
-
-    // Spline viewer accepts normalized timeline via setTime for scroll timelines
     try { sv.setTime?.(t); } catch {}
+    if (!locked && t >= 1) {
+      locked = true;
+      setGhostHeight(root.scrollTop + 1);
+    }
   }
 
-  function activateInternal() {
-    if (internal) return;
-    internal = true;
-    computeT(); // kick once
-  }
-
-  // If we expect a parent but never hear from it, fall back to internal after 600ms
-  if (external) {
-    fallbackTimer = window.setTimeout(() => {
-      if (!gotParentMsg) activateInternal();
-    }, 600);
-  }
-
-  // Always drive timeline from window scroll in internal mode
-  window.addEventListener('scroll', () => {
-    if (internal) computeT();
-  }, { passive: true });
-  window.addEventListener('resize', () => {
-    if (internal) computeT();
-  });
+  window.addEventListener('scroll', () => { if (internal) computeT(); }, { passive: true });
+  window.addEventListener('resize', () => { if (internal) computeT(); });
   computeT();
 
-  // Parent → child messages (external mode)
+  // External (parent-driven) support stays intact
   window.addEventListener('message', (e) => {
     const d = e?.data || {};
     if (!d || typeof d !== 'object') return;
-
-    if (d.type === 'FRAMER_SCROLL_INIT') {
-      gotParentMsg = true;
-      if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = 0; }
-      // Switch to external driving
-      internal = false;
-      setGhostHeight();
-      try { sv.pause?.(); sv.setTime?.(0); } catch {}
-      return;
-    }
-
+    if (d.type === 'FRAMER_SCROLL_INIT') { internal = false; return; }
     if (d.type === 'FRAMER_SCROLL_PROGRESS' && typeof d.progress === 'number') {
-      gotParentMsg = true;
-      if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = 0; }
       internal = false;
-      setGhostHeight();
-      try { sv.setTime?.(Math.min(1, Math.max(0, d.progress))); } catch {}
-      return;
+      const p = Math.min(1, Math.max(0, d.progress));
+      try { sv.setTime?.(p); } catch {}
+      if (!locked && p >= 1) { locked = true; setGhostHeight(root.scrollTop + 1); }
     }
   });
 })();
