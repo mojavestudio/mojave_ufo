@@ -6,9 +6,16 @@
   <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
   <style>
     html, body { margin:0; height:100%; background:transparent; }
-    #outer { position:relative; height:180vh; }  /* internal scroll */
-    #sticky { position:sticky; top:0; height:100vh; }
+    /* Prefer svh to avoid mobile URL bar jumps */
+    #outer  { position:relative; height:180svh; }
+    #sticky { position:sticky; top:0; height:100svh; }
     spline-viewer { width:100%; height:100%; display:block; }
+
+    @supports not (height: 100svh) {
+      /* Fallback handled by JS (visualViewport) */
+      #outer  { height:auto; }
+      #sticky { height:100vh; }
+    }
 
     /* Hide scrollbars but keep scrolling (cross-browser) */
     html, body { -ms-overflow-style: none; scrollbar-width: none; }
@@ -25,9 +32,26 @@
   <script type="module">
     const qp = new URLSearchParams(location.search);
     const outer = document.getElementById('outer');
-    outer.style.height = qp.get('scrollpx')
-      ? parseInt(qp.get('scrollpx'),10) + 'px'
-      : `calc(${parseFloat(qp.get('scrollvh')||'180')} * 1vh)`;
+
+    function applyHeight() {
+      const px = parseInt(qp.get('scrollpx') || '0', 10);
+      if (px) {
+        outer.style.height = px + 'px';
+        return;
+      }
+      const vh = parseFloat(qp.get('scrollvh') || '170');
+      const unit = (window.visualViewport?.height || window.innerHeight) / 100;
+      outer.style.height = (vh * unit) + 'px';
+    }
+
+    // Only apply JS fallback if svh unsupported or query params present
+    const needsJS = !CSS.supports('height', '100svh') || qp.has('scrollvh') || qp.has('scrollpx');
+    if (needsJS) {
+      applyHeight();
+      window.visualViewport?.addEventListener('resize', applyHeight);
+      window.addEventListener('orientationchange', applyHeight);
+      window.addEventListener('resize', applyHeight);
+    }
 
     if (qp.get('external') === '1') {
       window.addEventListener('message', (e) => {
