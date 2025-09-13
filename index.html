@@ -2,59 +2,88 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
-  <style>
-    html, body { margin:0; height:100%; background:transparent; }
-    /* Prefer svh to avoid mobile URL bar jumps */
-    #outer  { position:relative; height:180svh; }
-    #sticky { position:sticky; top:0; height:100svh; }
-    spline-viewer { width:100%; height:100%; display:block; }
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
+  />
+  <title>Mojave UFO</title>
 
-    @supports not (height: 100svh) {
-      /* Fallback handled by JS (visualViewport) */
-      #outer  { height:auto; }
-      #sticky { height:100vh; }
+  <!-- Use your pinned viewer; do NOT load another viewer anywhere else -->
+  <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
+
+  <style>
+    /* --- Reset & viewport-consistent units --- */
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: transparent; }
+
+    /* Always reference the *viewport*, not a parent’s centered layout */
+    #outer  { position: relative; width: 100vw; }
+    #sticky { position: sticky; top: 0; width: 100vw; height: 100svh; }
+
+    /* Force the host element to be truly fluid (override any default max-width) */
+    spline-viewer {
+      width: 100vw !important;
+      height: 100svh !important;
+      max-width: none !important;
+      min-width: 0 !important;
+      display: block !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      box-sizing: border-box !important;
     }
 
-    /* Hide scrollbars but keep scrolling (cross-browser) */
-    html, body { -ms-overflow-style: none; scrollbar-width: none; }
-    html::-webkit-scrollbar, body::-webkit-scrollbar { width: 0; height: 0; display: none; }
+    /* If Spline exposes parts on your build, these help; otherwise harmless no-ops */
+    spline-viewer::part(container),
+    spline-viewer::part(canvas) {
+      width: 100% !important;
+      height: 100% !important;
+      max-width: none !important;
+    }
   </style>
 </head>
 <body>
+  <!-- The scrollable spacer (height set via handshake or fallback) -->
   <section id="outer">
     <div id="sticky">
-      <spline-viewer id="viewer" url="./scene.splinecode" events-target="local"></spline-viewer>
+      <spline-viewer
+        id="viewer"
+        url="./scene.splinecode"
+        events-target="local"
+        style="width:100vw;height:100svh;max-width:none;min-width:0;display:block"
+      ></spline-viewer>
     </div>
   </section>
 
   <script type="module">
+    /* ---------- Responsive height: pixel-handshake + robust fallback ---------- */
     const qp    = new URLSearchParams(location.search);
     const outer = document.getElementById('outer');
 
-    // Fallback height if parent hasn't spoken yet (rare)
-    function fallbackHeight() {
+    function applyFallbackHeight() {
+      // Fallback if parent hasn't sent range yet
       const px = parseInt(qp.get('scrollpx') || '0', 10);
-      const vh = parseFloat(qp.get('scrollvh') || '170'); // only used as a fallback
-      if (px) outer.style.height = px + 'px';
-      else {
+      if (px) {
+        outer.style.height = px + 'px';
+      } else {
+        const vh = parseFloat(qp.get('scrollvh') || '170'); // harmless default
         const unit = (window.visualViewport?.height || window.innerHeight) / 100;
         outer.style.height = (vh * unit) + 'px';
       }
     }
-    fallbackHeight();
+
+    applyFallbackHeight();
 
     let rangePx = null;
 
+    // Parent → child sync
     if (qp.get('external') === '1') {
       window.addEventListener('message', (e) => {
         const d = e?.data;
         if (!d) return;
 
         if (d.type === 'SCROLL_RANGE' && Number.isFinite(d.rangePx)) {
+          // Make internal scroll range match parent exactly
           rangePx = Math.max(0, d.rangePx);
-          outer.style.height = (rangePx + window.innerHeight) + 'px'; // make internal range match parent
+          outer.style.height = (rangePx + window.innerHeight) + 'px';
         }
 
         if (d.type === 'SCROLL_PROGRESS' && Number.isFinite(d.progress)) {
@@ -63,11 +92,24 @@
         }
       });
 
-      // Keep sizes aligned if the child viewport changes (mobile URL bar, rotation)
-      window.addEventListener('resize', () => {
+      // Keep height aligned if mobile UI changes viewport height
+      const reapply = () => {
         if (rangePx != null) outer.style.height = (rangePx + window.innerHeight) + 'px';
-      });
+      };
+      window.visualViewport?.addEventListener('resize', reapply);
+      window.addEventListener('orientationchange', reapply);
+      window.addEventListener('resize', reapply);
     }
+
+    /* ---------- (Optional) mobile/desktop scene swap if you have both ---------- */
+    // const viewer = document.getElementById('viewer');
+    // const force  = qp.get('force');
+    // const narrow = force === 'mobile' || window.matchMedia('(max-width: 768px)').matches;
+    // const desktopUrl = './scene-desktop.splinecode';
+    // const mobileUrl  = './scene-mobile.splinecode';
+    // fetch(mobileUrl, { method: 'HEAD' }).then(r => {
+    //   if (r.ok && viewer) viewer.setAttribute('url', narrow ? mobileUrl : desktopUrl);
+    // }).catch(() => {});
   </script>
 </body>
 </html>
