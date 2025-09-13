@@ -11,7 +11,7 @@
 
 <style>
   /* Allow the document to grow and scroll */
-  html, body { margin: 0; min-height: 100%; background: transparent; }
+  html, body { margin: 0; min-height: 100%; background: transparent; overscroll-behavior: none; }
 
   spline-viewer { display: block; touch-action: pan-y; }
 
@@ -37,53 +37,63 @@
 <div id="ghost-scroll" style="height:200vh; visibility:hidden; pointer-events:none;"></div>
 
 <script>
-(function () {
-  const sv     = document.getElementById('sv');
-  const html   = document.documentElement;
-  const root   = document.scrollingElement || html;
-  const ghost  = document.getElementById('ghost-scroll');
+(() => {
+  const sv     = document.getElementById('sv');                 // <spline-viewer id="sv">
+  const root   = document.scrollingElement || document.documentElement;
+  const ghost  = document.getElementById('ghost-scroll');       // <div id="ghost-scroll">
 
-  const params   = new URLSearchParams(location.search);
-  const external = params.get('external') === '1' || params.get('external') === 'true';
+  const q      = new URLSearchParams(location.search);
+  const external = q.get('external') === '1' || q.get('external') === 'true';
 
-  // --- 1) Configurable scroll distance ---
-  // Use ?scrollvh=120 (vh units) or ?scrollpx=900 (px). Defaults to 120vh if nothing is given.
-  function targetScrollPx() {
-    const px  = parseFloat(params.get('scrollpx') || '');
-    const vh  = parseFloat(params.get('scrollvh') || '');
+  // ===== Config =====
+  // How long should the scroll be? Use ?scrollvh=110 or ?scrollpx=900
+  const scrollPx = (() => {
+    const px = parseFloat(q.get('scrollpx') || '');
+    const vh = parseFloat(q.get('scrollvh') || '');
     if (!Number.isNaN(px) && px > 0) return px;
     if (!Number.isNaN(vh) && vh > 0) return Math.round(window.innerHeight * (vh / 100));
-    return Math.round(window.innerHeight * 1.2); // default: ~1.2 screens
-  }
+    return Math.round(window.innerHeight * 1.2); // sensible default ~1.2 screens
+  })();
+
+  // Where does the animation visually finish on the 0..1 timeline?
+  // Example: if your Spline Scroll event stops changing after ~68% => ?end=0.68
+  const end = (() => {
+    const e = parseFloat(q.get('end') || '');
+    return Number.isFinite(e) ? Math.min(1, Math.max(0.05, e)) : 1; // default = full
+  })();
 
   function setGhostHeight(px) {
-    ghost.style.height = Math.max(1, px) + 'px';
-    ghost.style.display = 'block';
+    ghost.style.display = 'block';              // MUST be visible, not display:none
+    ghost.style.height  = Math.max(1, px) + 'px';
   }
 
-  // Initial spacer (you can tweak with ?scrollvh / ?scrollpx)
-  setGhostHeight(targetScrollPx());
-  window.addEventListener('resize', () => setGhostHeight(targetScrollPx()));
+  setGhostHeight(scrollPx);
+  window.addEventListener('resize', () => setGhostHeight(scrollPx));
 
-  // --- 2) Drive Spline from scroll + auto-lock at the end ---
-  let internal = !external;    // default to internal if no parent driver
-  let locked   = false;        // becomes true once we reach t == 1
+  let internal = !external;
+  let locked   = false;
 
-  function computeT() {
-    const max = Math.max(1, root.scrollHeight - root.clientHeight);
-    const t   = Math.min(1, Math.max(0, root.scrollTop / max));
+  function setProgress(t) {
     try { sv.setTime?.(t); } catch {}
-    if (!locked && t >= 1) {
+    if (!locked && t >= end) {
+      // Trim trailing scroll so the page ends right when visuals finish
       locked = true;
       setGhostHeight(root.scrollTop + 1);
     }
   }
 
+  function computeT() {
+    const max = Math.max(1, root.scrollHeight - root.clientHeight);
+    const t   = Math.min(1, Math.max(0, root.scrollTop / max));
+    setProgress(t);
+  }
+
+  // Internal drive
   window.addEventListener('scroll', () => { if (internal) computeT(); }, { passive: true });
   window.addEventListener('resize', () => { if (internal) computeT(); });
   computeT();
 
-  // External (parent-driven) support stays intact
+  // External (parent-driven) still supported
   window.addEventListener('message', (e) => {
     const d = e?.data || {};
     if (!d || typeof d !== 'object') return;
@@ -91,8 +101,7 @@
     if (d.type === 'FRAMER_SCROLL_PROGRESS' && typeof d.progress === 'number') {
       internal = false;
       const p = Math.min(1, Math.max(0, d.progress));
-      try { sv.setTime?.(p); } catch {}
-      if (!locked && p >= 1) { locked = true; setGhostHeight(root.scrollTop + 1); }
+      setProgress(p);
     }
   });
 })();
