@@ -115,6 +115,19 @@
       }, 900);
     }
 
+    // Parent-driven bridge: accept progress 0..1 and translate to this document's scrollTop.
+    // Also scrub the viewer's timeline so timeline-only scenes sync too.
+    if (isExternal) {
+      window.addEventListener('message', (e) => {
+        const d = e?.data || {};
+        if (d.type !== 'SCROLL_PROGRESS') return;
+        const p = Math.max(0, Math.min(1, Number(d.progress) || 0));
+        const max = Math.max(0, (document.scrollingElement || document.documentElement).scrollHeight - window.innerHeight);
+        try { (document.scrollingElement || document.documentElement).scrollTo(0, p * max); } catch {}
+        try { const dur = Number(sv?.duration || 1); sv.setTime?.(p * dur); sv.play?.(); } catch {}
+      }, { passive: true });
+    }
+
     // Safety: if viewer never registers, script didn't load
     setTimeout(() => {
       if (!customElements.get('spline-viewer')) {
