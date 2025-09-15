@@ -46,20 +46,38 @@
     <div id="sticky">
       <spline-viewer
         id="viewer"
-        url="./scene.splinecode"
         events-target="local"
-        style="width:100vw;height:100svh;max-width:none;min-width:0;display:block"
+        loading="auto"
       ></spline-viewer>
     </div>
   </section>
 
   <script type="module">
-    /* ---------- Responsive height: pixel-handshake + robust fallback ---------- */
-    const qp    = new URLSearchParams(location.search);
+    const qp = new URLSearchParams(location.search);
     const outer = document.getElementById('outer');
+    const viewer = document.getElementById('viewer');
+
+    // Dynamic variant detection
+    function getSceneUrl() {
+      const isMobile = window.matchMedia('(max-width: 640px)').matches; // Adjust breakpoint as needed
+      return isMobile ? './scene-mobile.splinecode' : './scene-desktop.splinecode'; // Fallback to scene.splinecode if needed
+    }
+
+    function updateScene() {
+      const url = getSceneUrl();
+      if (viewer.url !== url) {
+        viewer.url = url; // Triggers reload in spline-viewer
+      }
+    }
+
+    // Initial load
+    updateScene();
+
+    // Listen for changes (resize, orientation)
+    window.addEventListener('resize', updateScene);
+    window.addEventListener('orientationchange', updateScene);
 
     function applyFallbackHeight() {
-      // Fallback if parent hasn't sent range yet
       const px = parseInt(qp.get('scrollpx') || '0', 10);
       if (px) {
         outer.style.height = px + 'px';
@@ -69,47 +87,33 @@
         outer.style.height = (vh * unit) + 'px';
       }
     }
-
     applyFallbackHeight();
 
     let rangePx = null;
 
-    // Parent → child sync
+    // Parent → child sync (when embedded with ?external=1)
     if (qp.get('external') === '1') {
       window.addEventListener('message', (e) => {
         const d = e?.data;
         if (!d) return;
-
         if (d.type === 'SCROLL_RANGE' && Number.isFinite(d.rangePx)) {
-          // Make internal scroll range match parent exactly
           rangePx = Math.max(0, d.rangePx);
           outer.style.height = (rangePx + window.innerHeight) + 'px';
         }
-
         if (d.type === 'SCROLL_PROGRESS' && Number.isFinite(d.progress)) {
           const max = document.documentElement.scrollHeight - window.innerHeight;
           document.documentElement.scrollTop = d.progress * Math.max(0, max);
         }
       });
 
-      // Keep height aligned if mobile UI changes viewport height
       const reapply = () => {
         if (rangePx != null) outer.style.height = (rangePx + window.innerHeight) + 'px';
+        updateScene(); // Re-check variant on parent-triggered resizes
       };
       window.visualViewport?.addEventListener('resize', reapply);
       window.addEventListener('orientationchange', reapply);
       window.addEventListener('resize', reapply);
     }
-
-    /* ---------- (Optional) mobile/desktop scene swap if you have both ---------- */
-    // const viewer = document.getElementById('viewer');
-    // const force  = qp.get('force');
-    // const narrow = force === 'mobile' || window.matchMedia('(max-width: 768px)').matches;
-    // const desktopUrl = './scene-desktop.splinecode';
-    // const mobileUrl  = './scene-mobile.splinecode';
-    // fetch(mobileUrl, { method: 'HEAD' }).then(r => {
-    //   if (r.ok && viewer) viewer.setAttribute('url', narrow ? mobileUrl : desktopUrl);
-    // }).catch(() => {});
   </script>
 </body>
 </html>
