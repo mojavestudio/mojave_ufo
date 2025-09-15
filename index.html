@@ -57,6 +57,9 @@
     const outer = document.getElementById('outer');
     const viewer = document.getElementById('viewer');
 
+    // Track whether the parent provided an explicit scroll range yet
+    let didReceiveRange = false;
+
     // Dynamic variant detection
     function getSceneUrl() {
       const isMobile = window.matchMedia('(max-width: 640px)').matches; // Adjust breakpoint as needed
@@ -84,12 +87,20 @@
     });
 
     function applyFallbackHeight() {
+      const isExternal = qp.get('external') === '1';
+      if (isExternal && !didReceiveRange) {
+        // In iframe mode, start at exactly 100vh until host tells us range
+        const viewport = window.innerHeight;
+        outer.style.height = viewport + 'px';
+        console.log('External fallback height (no range yet):', viewport);
+        return;
+      }
       const px = parseInt(qp.get('scrollpx') || '0', 10);
       if (px) {
         console.log('Applying fallback height from scrollpx:', px);
         outer.style.height = px + 'px';
       } else {
-        const vh = parseFloat(qp.get('scrollvh') || '170'); // harmless default
+        const vh = parseFloat(qp.get('scrollvh') || '170'); // harmless default for standalone mode
         const unit = (window.visualViewport?.height || window.innerHeight) / 100;
         console.log('Applying fallback height from scrollvh:', vh, 'unit:', unit);
         outer.style.height = (vh * unit) + 'px';
@@ -105,9 +116,24 @@
         const d = e?.data;
         if (!d) return;
         if (d.type === 'SCROLL_RANGE' && Number.isFinite(d.rangePx)) {
-          rangePx = Math.max(0, d.rangePx);
-          outer.style.height = (rangePx + window.innerHeight) + 'px';
-          console.log('Received SCROLL_RANGE message. rangePx:', rangePx, 'New outer height:', outer.style.height);
+          didReceiveRange = true;
+          const raw = Number(d.rangePx);
+          const viewport = window.innerHeight;
+          let newHeight;
+          if (raw >= viewport * 1.5) {
+            // Parent likely sent TOTAL height (not range). Normalize to range.
+            newHeight = Math.max(raw, viewport);
+            rangePx = Math.max(0, newHeight - viewport);
+          } else {
+            // Parent sent RANGE (scrollable distance). Convert to total height.
+            rangePx = Math.max(0, raw);
+            newHeight = rangePx + viewport;
+          }
+          // Soft safety cap to avoid accidental runaway values
+          const MAX_HEIGHT = 200000; // 200k px
+          newHeight = Math.min(Math.max(newHeight, viewport), MAX_HEIGHT);
+          outer.style.height = newHeight + 'px';
+          console.log('Received SCROLL_RANGE message. raw:', raw, 'interpreted rangePx:', rangePx, 'applied total height:', newHeight);
         }
         if (d.type === 'SCROLL_PROGRESS' && Number.isFinite(d.progress)) {
           const max = document.documentElement.scrollHeight - window.innerHeight;
@@ -117,10 +143,17 @@
       });
 
       const reapply = () => {
-        if (rangePx != null) {
-          const newHeight = rangePx + window.innerHeight;
+        const viewport = window.innerHeight;
+        if (didReceiveRange && rangePx != null) {
+          let newHeight = rangePx + viewport;
+          const MAX_HEIGHT = 200000;
+          newHeight = Math.min(Math.max(newHeight, viewport), MAX_HEIGHT);
           outer.style.height = newHeight + 'px';
-          console.log('Reapplying height on resize/orientation. rangePx:', rangePx, 'innerHeight:', window.innerHeight, 'New height:', newHeight);
+          console.log('Reapplying height with range. rangePx:', rangePx, 'innerHeight:', viewport, 'New height:', newHeight);
+        } else {
+          // Still waiting for parent — keep it at 100vh to avoid jumps
+          outer.style.height = viewport + 'px';
+          console.log('Reapplying height without range — clamped to viewport:', viewport);
         }
         updateScene(); // Re-check variant on parent-triggered resizes
       };
