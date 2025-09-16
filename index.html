@@ -26,6 +26,7 @@
       max-width:none !important;
       min-width:0 !important;
       box-sizing:border-box !important;
+      contain: layout paint;
     }
   </style>
 
@@ -35,6 +36,7 @@
         id="viewer"
         url="./scene.splinecode"
         events-target="local"
+        loading="eager"
         style="display:block;width:100%;height:100%"
       ></spline-viewer>
     </div>
@@ -42,75 +44,63 @@
 
   <script>
     (function () {
-      console.info("[mojave_ufo] child v11 loaded", new Date().toISOString());
+      console.info('[mojave_ufo] child v12 loaded', new Date().toISOString());
 
       const qp     = new URLSearchParams(location.search);
-      const outer  = document.getElementById("outer");
-      const sticky = document.getElementById("sticky");
+      const outer  = document.getElementById('outer');
+      const sticky = document.getElementById('sticky');
 
-      // --- 1) LOCK the viewport height in *pixels* to avoid post-hydration jiggle ---
-      function vpH() {
-        return Math.round((window.visualViewport?.height || window.innerHeight) || 0);
-      }
-      function lockStickyToViewport() {
-        const h = vpH();
-        sticky.style.height = h + "px";         // sticky box is a fixed px height
-        sticky.dataset.locked = "1";
-        return h;
-      }
-      // initial lock before anything else
-      let lockedVp = lockStickyToViewport();
+      // 1) Lock the sticky box to a concrete pixel height immediately.
+      const vpH = () => Math.round((window.visualViewport?.height || window.innerHeight) || 0);
+      function lockSticky(px) { sticky.style.height = px + 'px'; return px; }
+      let lockedVp = lockSticky(vpH());
 
-      // --- 2) Set OUTER scroll length (internal fallback when not embedded) ---
+      // 2) Provide a sane scroll length even if no parent sync is used.
       function setOuterLengthFallback() {
-        const px = parseInt(qp.get("scrollpx") || "0", 10);
-        if (px) { outer.style.height = px + "px"; return; }
-        const mult = parseFloat(qp.get("scrollvh") || "170", 10); // default 170vh
-        outer.style.height = Math.round(lockedVp * (mult / 100)) + "px";
+        const px = parseInt(qp.get('scrollpx') || '0', 10);
+        if (px) { outer.style.height = px + 'px'; return; }
+        const mult = parseFloat(qp.get('scrollvh') || '170', 10); // default 170vh
+        outer.style.height = Math.round(lockedVp * (mult / 100)) + 'px';
       }
       setOuterLengthFallback();
 
-      // --- 3) Only update lock on *real* resizes to avoid tiny toolbar jitters ---
-      let resizeRAF = 0, lastUpdate = Date.now();
-      function maybeRelock(force = false) {
-        cancelAnimationFrame(resizeRAF);
-        resizeRAF = requestAnimationFrame(() => {
+      // 3) Only re-lock when the viewport really changes (avoid iOS toolbar jitter).
+      let raf = 0, lastUpdate = Date.now();
+      function maybeRelock(force=false) {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => {
           const curr = vpH();
           const delta = Math.abs(curr - lockedVp);
-          const enoughTime = Date.now() - lastUpdate > 300;  // debounce
-          if (force || delta >= 48) {                        // ~toolbar/orientation threshold
-            lockedVp = lockStickyToViewport();
+          const enoughTime = Date.now() - lastUpdate > 300;
+          if (force || (delta >= 48 && enoughTime)) {
+            lockedVp = lockSticky(curr);
             setOuterLengthFallback();
             lastUpdate = Date.now();
           }
         });
       }
+      window.addEventListener('orientationchange', () => maybeRelock(true), { passive:true });
+      window.visualViewport?.addEventListener('resize', () => maybeRelock(false), { passive:true });
+      window.addEventListener('resize', () => maybeRelock(false), { passive:true });
 
-      window.addEventListener("orientationchange", () => maybeRelock(true), { passive: true });
-      window.visualViewport?.addEventListener("resize", () => maybeRelock(false), { passive: true });
-      window.addEventListener("resize", () => maybeRelock(false), { passive: true });
-
-      // --- 4) Parent ↔ Child bridge (external=1) ---
+      // 4) Optional: parent<->child range/progress sync when you use ?external=1
       let haveRange = false;
-      function pingParent() {
-        try { window.parent?.postMessage({ type: "HELLO_FROM_CHILD", v: 11 }, "*"); } catch {}
-      }
-      window.addEventListener("message", (e) => {
+      function askParent() { try { parent?.postMessage({ type:'HELLO_FROM_CHILD', v:12 }, '*'); } catch {} }
+
+      window.addEventListener('message', (e) => {
         const d = e?.data; if (!d) return;
-        if (d.type === "SCROLL_RANGE" && Number.isFinite(d.rangePx)) {
+        if (d.type === 'SCROLL_RANGE' && Number.isFinite(d.rangePx)) {
           haveRange = true;
-          outer.style.height = (Math.max(0, d.rangePx) + lockedVp) + "px";
-        } else if (d.type === "SCROLL_PROGRESS" && Number.isFinite(d.progress)) {
+          outer.style.height = (Math.max(0, d.rangePx) + lockedVp) + 'px';
+        } else if (d.type === 'SCROLL_PROGRESS' && Number.isFinite(d.progress)) {
           const max = document.documentElement.scrollHeight - lockedVp;
           document.documentElement.scrollTop = d.progress * Math.max(0, max);
         }
       });
 
-      // ask early and again after load
-      if (qp.get("external") === "1") {
-        pingParent();
-        window.addEventListener("load", pingParent, { once: true });
-        // last resort: ensure something sensible if no parent reply
+      if (qp.get('external') === '1') {
+        askParent();
+        window.addEventListener('load', askParent, { once:true });
         setTimeout(() => { if (!haveRange) setOuterLengthFallback(); }, 800);
       }
     })();
