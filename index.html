@@ -60,30 +60,34 @@
     // Track whether the parent provided an explicit scroll range yet
     let didReceiveRange = false;
 
-    // Dynamic variant detection
+    // Dynamic variant selection (stable)
     function getSceneUrl() {
-      const isMobile = window.matchMedia('(max-width: 640px)').matches; // Adjust breakpoint as needed
-      return isMobile ? './scene-mobile.splinecode' : './scene-desktop.splinecode'; // Fallback to scene.splinecode if needed
+      const force = (qp.get('force') || '').toLowerCase();
+      if (force === 'mobile') return './scene-mobile.splinecode';
+      if (force === 'desktop') return './scene-desktop.splinecode';
+      // Default heuristic: portrait => mobile; landscape => desktop (more stable than width in iframes)
+      const w = window.visualViewport?.width || window.innerWidth;
+      const h = window.visualViewport?.height || window.innerHeight;
+      const isPortrait = h >= w;
+      return isPortrait ? './scene-mobile.splinecode' : './scene-desktop.splinecode';
     }
 
-    function updateScene() {
+    function setSceneUrlOnce() {
       const url = getSceneUrl();
-      if (viewer.url !== url) {
-        viewer.url = url; // Triggers reload in spline-viewer
+      if (viewer.getAttribute('url') !== url) {
+        viewer.setAttribute('url', url);
       }
     }
 
-    // Initial load
-    updateScene();
+    // Initial set; do not flip on resize to prevent reloads/slowness
+    setSceneUrlOnce();
 
-    // Listen for changes (resize, orientation)
+    // Listen for changes (resize, orientation) but DO NOT reload scene
     window.addEventListener('resize', () => {
       console.log('Resize event fired. Current innerHeight:', window.innerHeight, 'visualViewport.height:', window.visualViewport?.height);
-      updateScene();
     });
     window.addEventListener('orientationchange', () => {
       console.log('Orientation change event fired. Current innerHeight:', window.innerHeight, 'visualViewport.height:', window.visualViewport?.height);
-      updateScene();
     });
 
     function applyFallbackHeight() {
@@ -155,7 +159,7 @@
           outer.style.height = viewport + 'px';
           console.log('Reapplying height without range — clamped to viewport:', viewport);
         }
-        updateScene(); // Re-check variant on parent-triggered resizes
+        // Do not call setSceneUrlOnce() here to avoid reloads
       };
       window.visualViewport?.addEventListener('resize', () => {
         console.log('visualViewport resize event fired. New visual height:', window.visualViewport?.height);
