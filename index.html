@@ -18,6 +18,9 @@
     #outer  { position:relative; width:100vw }
     #sticky { position:sticky; top:0; width:100vw; /* height set via JS lock */ }
 
+    /* Absolutely cover the sticky box so internal reflow can't move layout */
+    .cover { position:absolute; inset:0; }
+
     /* Fill the sticky box pre/post hydration */
     spline-viewer {
       display:block !important;
@@ -35,13 +38,15 @@
 
   <section id="outer">
     <div id="sticky">
-      <spline-viewer
-        id="viewer"
-        url="./scene.splinecode"
-        events-target="local"
-        loading="eager"
-        style="display:block;width:100%;height:100%"
-      ></spline-viewer>
+      <div class="cover">
+        <spline-viewer
+          id="viewer"
+          url="./scene.splinecode"
+          events-target="local"
+          loading="eager"
+          style="display:block;width:100%;height:100%"
+        ></spline-viewer>
+      </div>
     </div>
   </section>
 
