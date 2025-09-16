@@ -16,12 +16,15 @@
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: transparent; }
 
     /* Always reference the *viewport*, not a parent’s centered layout */
-    #outer  { position: relative; width: 100vw; height: 100vh; } /* Start with 100vh via CSS */
-    #sticky { position: sticky; top: 0; width: 100vw; height: 100svh; }
+    #outer  { position: relative; width: 100vw; }
+    /* Baseline 100vh for broad support, 100svh overrides on modern iOS for stability */
+    #sticky { position: sticky; top: 0; width: 100vw; height: 100vh; height: 100svh; }
 
     /* Force the host element to be truly fluid (override any default max-width) */
     spline-viewer {
       width: 100vw !important;
+      /* Baseline + stable override */
+      height: 100vh !important;
       height: 100svh !important;
       max-width: none !important;
       min-width: 0 !important;
@@ -56,6 +59,19 @@
     const qp = new URLSearchParams(location.search);
     const outer = document.getElementById('outer');
     const viewer = document.getElementById('viewer');
+    const sticky = document.getElementById('sticky');
+
+    // Freeze initial viewport height on browsers without 100svh support to prevent the mobile jump
+    const supportsSVH = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('height', '100svh');
+    if (!supportsSVH && sticky) {
+      const initial = Math.round(window.visualViewport?.height || window.innerHeight);
+      sticky.style.height = initial + 'px';
+      // Update on orientation changes only (avoid URL-bar collapse resizes)
+      window.addEventListener('orientationchange', () => {
+        const h = Math.round(window.visualViewport?.height || window.innerHeight);
+        sticky.style.height = h + 'px';
+      });
+    }
 
     // Track whether the parent provided an explicit scroll range yet
     let didReceiveRange = false;
