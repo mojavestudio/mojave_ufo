@@ -144,7 +144,22 @@
         }
       });
 
-      const reapply = () => {
+      // Ignore resizes in the first 5s after load (common for mobile viewport settling)
+      const loadTime = Date.now();
+      const IGNORE_RESIZE_MS = 5000;
+
+      // Debounce reapply to avoid rapid-fire calls during viewport changes
+      let debounceTimer;
+      function debouncedReapply() {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(reapply, 1000); // 1s debounce
+      }
+
+      function reapply() {
+        if (Date.now() - loadTime < IGNORE_RESIZE_MS) {
+          console.log('Reapply ignored: Within initial ' + IGNORE_RESIZE_MS + 'ms load window');
+          return;
+        }
         if (!didReceiveRange) {
           console.log('Reapply skipped: No SCROLL_RANGE received yet — keeping CSS 100vh');
           return;
@@ -161,15 +176,15 @@
       };
       window.visualViewport?.addEventListener('resize', () => {
         console.log('visualViewport resize event fired. New visual height:', window.visualViewport?.height);
-        reapply();
+        debouncedReapply();
       });
       window.addEventListener('orientationchange', () => {
         console.log('Orientation change in external block. Current innerHeight:', window.innerHeight);
-        reapply();
+        debouncedReapply();
       });
       window.addEventListener('resize', () => {
         console.log('Resize event in external block. Current innerHeight:', window.innerHeight);
-        reapply();
+        debouncedReapply();
       });
     }
   </script>
