@@ -64,6 +64,9 @@
       const cover  = document.getElementById('cover');
       const viewer = document.getElementById('viewer');
       const SCENE_URL = './scene.splinecode';
+      const URL_MOBILE  = qp.get('urlMobile') || '';
+      const URL_DESKTOP = qp.get('urlDesktop') || '';
+      const BP_WIDTH = parseFloat(qp.get('bpWidth') || '768');
 
       // --- 1) PIXEL-LOCK the sticky container (no vh/svh volatility) ---
       const vpH = () => Math.round((visualViewport?.height || innerHeight) || 0);
@@ -121,10 +124,22 @@
           urlSet = true;
           // Allow quick override via ?url= for testing
           const overrideUrl = qp.get('url');
-          const finalUrl = overrideUrl || SCENE_URL;
+          let finalUrl = SCENE_URL;
+          let mode = 'default';
+
+          if (overrideUrl) {
+            finalUrl = overrideUrl;
+            mode = 'override';
+          } else if (URL_MOBILE || URL_DESKTOP) {
+            const isMobile = width <= BP_WIDTH;
+            finalUrl = isMobile
+              ? (URL_MOBILE || URL_DESKTOP || SCENE_URL)
+              : (URL_DESKTOP || URL_MOBILE || SCENE_URL);
+            mode = isMobile ? 'mobile' : 'desktop';
+          }
           try { viewer.setAttribute('url', finalUrl); } catch {}
           ro.disconnect();
-          log('set url', { finalUrl, width, height, t: (performance.now()-t0).toFixed(1)+'ms' });
+          log('set url', { finalUrl, mode, bp: BP_WIDTH, width, height, t: (performance.now()-t0).toFixed(1)+'ms' });
         }
       });
       ro.observe(sticky);
