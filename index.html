@@ -14,26 +14,21 @@
 <body>
   <!-- place this <style> anywhere in the BODY (not head) -->
   <style>
-    html, body { margin: 0; height: 100%; background: transparent; }
+    html, body { margin: 0; background: transparent; }
 
-    #outer  { position: relative; width: 100vw; }         /* scroll length wrapper */
-    #sticky { position: sticky; top: 0; width: 100vw; height: 100svh; } /* viewport-sized */
+    /* Outer creates scroll length; sticky provides viewport box */
+    #outer  { position: relative; width: 100vw; }
+    #sticky { position: sticky; top: 0; width: 100vw;
+              height: 100svh; height: 100dvh; height: 100lvh; }
 
+    /* Spline fills sticky box pre/post hydration */
     spline-viewer {
+      display: block !important;
       width: 100% !important;
       height: 100% !important;
       max-width: none !important;
       min-width: 0 !important;
-      display: block !important;
       box-sizing: border-box !important;
-    }
-
-    /* Harmless if parts don’t exist */
-    spline-viewer::part(container),
-    spline-viewer::part(canvas) {
-      width: 100% !important;
-      height: 100% !important;
-      max-width: none !important;
     }
   </style>
 
@@ -43,49 +38,72 @@
         id="viewer"
         url="./scene.splinecode"
         events-target="local"
-        style="width:100%;height:100%;display:block"
+        style="display:block;width:100%;height:100%"
       ></spline-viewer>
     </div>
-    <div id="spacer" aria-hidden="true"></div>
   </section>
 
-  <script type="module">
-    const qp    = new URLSearchParams(location.search);
-    const outer = document.getElementById('outer');
+  <script>
+    (function () {
+      const qp    = new URLSearchParams(location.search);
+      const outer = document.getElementById('outer');
 
-    function setOuterHeight() {
-      const px = parseInt(qp.get('scrollpx') || '0', 10);
-      if (px) { outer.style.height = px + 'px'; return; }
+      // Fallback height before SCROLL_RANGE arrives (or when not embedded)
+      function setFallbackHeight() {
+        const px = parseInt(qp.get('scrollpx') || '0', 10);
+        if (px) { outer.style.height = px + 'px'; return; }
 
-      const unit = (window.visualViewport?.height || window.innerHeight) / 100;
-      const vh   = parseFloat(qp.get('scrollvh') || '170', 10); // default 170vh
-      outer.style.height = (vh * unit) + 'px';
-    }
+        // Use visual viewport to avoid iOS toolbar jumps
+        const vh = (window.visualViewport?.height || window.innerHeight);
+        const mult = parseFloat(qp.get('scrollvh') || '170', 10); // default 170vh
+        outer.style.height = (vh * (mult / 100)) + 'px';
+      }
 
-    setOuterHeight();
-    const reapply = () => setOuterHeight();
-    window.visualViewport?.addEventListener('resize', reapply);
-    window.addEventListener('orientationchange', reapply);
-    window.addEventListener('resize', reapply);
+      // Recompute immediately on any viewport change (no quiet window)
+      let raf = 0;
+      const onVV = () => {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(setFallbackHeight);
+      };
 
-    // Optional: parent→child scroll sync for ?external=1
-    if (qp.get('external') === '1') {
-      let rangePx = null;
+      setFallbackHeight();
+      window.visualViewport?.addEventListener('resize', onVV);
+      window.addEventListener('resize', onVV);
+      window.addEventListener('orientationchange', onVV);
+
+      // --- Parent ↔ Child messaging (fixes race) ---
+      let haveRange = false;
+
+      function askParentForRange() {
+        try { window.parent?.postMessage({ type: 'HELLO_FROM_CHILD', v: 1 }, '*'); } catch (e) {}
+      }
+
       window.addEventListener('message', (e) => {
         const d = e?.data;
         if (!d) return;
 
         if (d.type === 'SCROLL_RANGE' && Number.isFinite(d.rangePx)) {
-          rangePx = Math.max(0, d.rangePx);
-          outer.style.height = (rangePx + window.innerHeight) + 'px';
+          haveRange = true;
+          const rangePx = Math.max(0, d.rangePx);
+          const vp = (window.visualViewport?.height || window.innerHeight);
+          outer.style.height = (rangePx + vp) + 'px';
         } else if (d.type === 'SCROLL_PROGRESS' && Number.isFinite(d.progress)) {
           const max = document.documentElement.scrollHeight - window.innerHeight;
-          requestAnimationFrame(() => {
-            document.documentElement.scrollTop = d.progress * Math.max(0, max);
-          });
+          document.documentElement.scrollTop = d.progress * Math.max(0, max);
         }
       });
-    }
+
+      // Ask early, on load, and on first vv-resize until we get a range
+      askParentForRange();
+      window.addEventListener('load', askParentForRange);
+      let vvOnce = false;
+      window.visualViewport?.addEventListener('resize', () => {
+        if (!haveRange && !vvOnce) { vvOnce = true; askParentForRange(); }
+      });
+
+      // Last resort: reapply fallback after 1s if no range yet
+      setTimeout(() => { if (!haveRange) setFallbackHeight(); }, 1000);
+    })();
   </script>
 </body>
 </html>
