@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Mojave UFO – Parent Embed Test</title>
+</head>
+<body>
+  <div id="ufo-wrap" style="position:relative;width:100%;min-height:1px;">
+    <iframe
+      id="ufo"
+      src="https://mojavestudio.github.io/mojave_ufo/?external=0&v=14"
+      loading="eager"
+      allow="xr-spatial-tracking; fullscreen; gyroscope; accelerometer"
+      style="
+        display:block;border:0;width:100%;
+        height:1px; /* will be set by script below */
+        max-width:none; box-sizing:border-box;
+        /* dvh fixes initial mobile viewport mismatch without touching <head> */
+        min-height:100dvh; min-height:100svh; min-height:100vh;
+      "
+    ></iframe>
+
+    <script>
+      (function () {
+        const ifr  = document.getElementById('ufo');
+        const wrap = document.getElementById('ufo-wrap');
+
+        // lock to real visual viewport in px; debounce resize
+        const vpH = () => Math.round((window.visualViewport?.height || window.innerHeight) || 0);
+        let raf = 0;
+
+        function lock(force) {
+          cancelAnimationFrame(raf);
+          raf = requestAnimationFrame(() => {
+            const h = vpH();
+            if (force || h) {
+              ifr.style.height  = h + 'px';
+              wrap.style.height = h + 'px';
+            }
+          });
+        }
+
+        lock(true);
+        addEventListener('resize', () => lock(false), { passive: true });
+        visualViewport?.addEventListener('resize', () => lock(false), { passive: true });
+        addEventListener('orientationchange', () => lock(true), { passive: true });
+      })();
+    </script>
+  </div>
+</body>
+</html>
+
+
