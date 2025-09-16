@@ -10,31 +10,25 @@
 
   <!-- Use your pinned viewer; do NOT load another viewer anywhere else -->
   <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
-
+</head>
+<body>
+  <!-- place this <style> anywhere in the BODY (not head) -->
   <style>
-    /* --- Reset & viewport-consistent units --- */
-    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: transparent; }
+    html, body { margin: 0; height: 100%; background: transparent; }
 
-    /* Always reference the *viewport*, not a parent’s centered layout */
-    #outer  { position: relative; width: 100vw; }
-    /* Baseline 100vh for broad support, 100svh overrides on modern iOS for stability */
-    #sticky { position: sticky; top: 0; width: 100vw; height: 100vh; height: 100svh; }
+    #outer  { position: relative; width: 100vw; }         /* scroll length wrapper */
+    #sticky { position: sticky; top: 0; width: 100vw; height: 100svh; } /* viewport-sized */
 
-    /* Force the host element to be truly fluid (override any default max-width) */
     spline-viewer {
-      width: 100vw !important;
-      /* Baseline + stable override */
-      height: 100vh !important;
-      height: 100svh !important;
+      width: 100% !important;
+      height: 100% !important;
       max-width: none !important;
       min-width: 0 !important;
       display: block !important;
-      margin: 0 !important;
-      padding: 0 !important;
       box-sizing: border-box !important;
     }
 
-    /* If Spline exposes parts on your build, these help; otherwise harmless no-ops */
+    /* Harmless if parts don’t exist */
     spline-viewer::part(container),
     spline-viewer::part(canvas) {
       width: 100% !important;
@@ -42,165 +36,54 @@
       max-width: none !important;
     }
   </style>
-</head>
-<body>
-  <!-- The scrollable spacer (height set via handshake or fallback) -->
+
   <section id="outer">
     <div id="sticky">
       <spline-viewer
         id="viewer"
+        url="./scene.splinecode"
         events-target="local"
-        loading="auto"
+        style="width:100%;height:100%;display:block"
       ></spline-viewer>
     </div>
+    <div id="spacer" aria-hidden="true"></div>
   </section>
 
   <script type="module">
-    const qp = new URLSearchParams(location.search);
+    const qp    = new URLSearchParams(location.search);
     const outer = document.getElementById('outer');
-    const viewer = document.getElementById('viewer');
-    const sticky = document.getElementById('sticky');
 
-    // Freeze initial viewport height on browsers without 100svh support to prevent the mobile jump
-    const supportsSVH = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('height', '100svh');
-    if (!supportsSVH && sticky) {
-      const initial = Math.round(window.visualViewport?.height || window.innerHeight);
-      sticky.style.height = initial + 'px';
-      // Update on orientation changes only (avoid URL-bar collapse resizes)
-      window.addEventListener('orientationchange', () => {
-        const h = Math.round(window.visualViewport?.height || window.innerHeight);
-        sticky.style.height = h + 'px';
-      });
-    }
-
-    // Track whether the parent provided an explicit scroll range yet
-    let didReceiveRange = false;
-
-    // Dynamic variant selection (stable)
-    function getSceneUrl() {
-      const force = (qp.get('force') || '').toLowerCase();
-      if (force === 'mobile') return './scene-mobile.splinecode';
-      if (force === 'desktop') return './scene-desktop.splinecode';
-      // Default heuristic: portrait => mobile; landscape => desktop (more stable than width in iframes)
-      const w = window.visualViewport?.width || window.innerWidth;
-      const h = window.visualViewport?.height || window.innerHeight;
-      const isPortrait = h >= w;
-      return isPortrait ? './scene-mobile.splinecode' : './scene-desktop.splinecode';
-    }
-
-    function setSceneUrlOnce() {
-      const url = getSceneUrl();
-      if (viewer.getAttribute('url') !== url) {
-        viewer.setAttribute('url', url);
-      }
-    }
-
-    // Initial set; do not flip on resize to prevent reloads/slowness
-    setSceneUrlOnce();
-
-    // Listen for changes (resize, orientation) but DO NOT reload scene
-    window.addEventListener('resize', () => {
-      console.log('Resize event fired. Current innerHeight:', window.innerHeight, 'visualViewport.height:', window.visualViewport?.height);
-    });
-    window.addEventListener('orientationchange', () => {
-      console.log('Orientation change event fired. Current innerHeight:', window.innerHeight, 'visualViewport.height:', window.visualViewport?.height);
-    });
-
-    function applyFallbackHeight() {
-      const isExternal = qp.get('external') === '1';
-      if (isExternal) {
-        // In iframe mode, rely on CSS 100vh initial; no JS override until range
-        console.log('External mode: Using CSS 100vh initial height until SCROLL_RANGE arrives');
-        return;
-      }
+    function setOuterHeight() {
       const px = parseInt(qp.get('scrollpx') || '0', 10);
-      if (px) {
-        console.log('Applying fallback height from scrollpx:', px);
-        outer.style.height = px + 'px';
-      } else {
-        const vh = parseFloat(qp.get('scrollvh') || '170'); // harmless default for standalone mode
-        const unit = (window.visualViewport?.height || window.innerHeight) / 100;
-        console.log('Applying fallback height from scrollvh:', vh, 'unit:', unit);
-        outer.style.height = (vh * unit) + 'px';
-      }
+      if (px) { outer.style.height = px + 'px'; return; }
+
+      const unit = (window.visualViewport?.height || window.innerHeight) / 100;
+      const vh   = parseFloat(qp.get('scrollvh') || '170', 10); // default 170vh
+      outer.style.height = (vh * unit) + 'px';
     }
-    applyFallbackHeight();
 
-    let rangePx = null;
+    setOuterHeight();
+    const reapply = () => setOuterHeight();
+    window.visualViewport?.addEventListener('resize', reapply);
+    window.addEventListener('orientationchange', reapply);
+    window.addEventListener('resize', reapply);
 
-    // Parent → child sync (when embedded with ?external=1)
+    // Optional: parent→child scroll sync for ?external=1
     if (qp.get('external') === '1') {
+      let rangePx = null;
       window.addEventListener('message', (e) => {
         const d = e?.data;
         if (!d) return;
+
         if (d.type === 'SCROLL_RANGE' && Number.isFinite(d.rangePx)) {
-          didReceiveRange = true;
-          const raw = Number(d.rangePx);
-          const viewport = window.innerHeight;
-          let newHeight;
-          if (raw >= viewport * 1.5) {
-            // Parent likely sent TOTAL height (not range). Normalize to range.
-            newHeight = Math.max(raw, viewport);
-            rangePx = Math.max(0, newHeight - viewport);
-          } else {
-            // Parent sent RANGE (scrollable distance). Convert to total height.
-            rangePx = Math.max(0, raw);
-            newHeight = rangePx + viewport;
-          }
-          // Soft safety cap to avoid accidental runaway values
-          const MAX_HEIGHT = 200000; // 200k px
-          newHeight = Math.min(Math.max(newHeight, viewport), MAX_HEIGHT);
-          outer.style.height = newHeight + 'px';
-          console.log('Received SCROLL_RANGE message. raw:', raw, 'interpreted rangePx:', rangePx, 'applied total height:', newHeight);
-        }
-        if (d.type === 'SCROLL_PROGRESS' && Number.isFinite(d.progress)) {
+          rangePx = Math.max(0, d.rangePx);
+          outer.style.height = (rangePx + window.innerHeight) + 'px';
+        } else if (d.type === 'SCROLL_PROGRESS' && Number.isFinite(d.progress)) {
           const max = document.documentElement.scrollHeight - window.innerHeight;
-          document.documentElement.scrollTop = d.progress * Math.max(0, max);
-          console.log('Received SCROLL_PROGRESS message. progress:', d.progress, 'Calculated scrollTop:', document.documentElement.scrollTop);
+          requestAnimationFrame(() => {
+            document.documentElement.scrollTop = d.progress * Math.max(0, max);
+          });
         }
-      });
-
-      // Ignore resizes in the first 5s after load (common for mobile viewport settling)
-      const loadTime = Date.now();
-      const IGNORE_RESIZE_MS = 5000;
-
-      // Debounce reapply to avoid rapid-fire calls during viewport changes
-      let debounceTimer;
-      function debouncedReapply() {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(reapply, 1000); // 1s debounce
-      }
-
-      function reapply() {
-        if (Date.now() - loadTime < IGNORE_RESIZE_MS) {
-          console.log('Reapply ignored: Within initial ' + IGNORE_RESIZE_MS + 'ms load window');
-          return;
-        }
-        if (!didReceiveRange) {
-          console.log('Reapply skipped: No SCROLL_RANGE received yet — keeping CSS 100vh');
-          return;
-        }
-        const viewport = window.innerHeight;
-        if (rangePx != null) {
-          let newHeight = rangePx + viewport;
-          const MAX_HEIGHT = 200000;
-          newHeight = Math.min(Math.max(newHeight, viewport), MAX_HEIGHT);
-          outer.style.height = newHeight + 'px';
-          console.log('Reapplying height with range. rangePx:', rangePx, 'innerHeight:', viewport, 'New height:', newHeight);
-        }
-        // Do not call setSceneUrlOnce() here to avoid reloads
-      };
-      window.visualViewport?.addEventListener('resize', () => {
-        console.log('visualViewport resize event fired. New visual height:', window.visualViewport?.height);
-        debouncedReapply();
-      });
-      window.addEventListener('orientationchange', () => {
-        console.log('Orientation change in external block. Current innerHeight:', window.innerHeight);
-        debouncedReapply();
-      });
-      window.addEventListener('resize', () => {
-        console.log('Resize event in external block. Current innerHeight:', window.innerHeight);
-        debouncedReapply();
       });
     }
   </script>
