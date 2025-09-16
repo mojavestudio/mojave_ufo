@@ -27,6 +27,9 @@
       min-width:0 !important;
       box-sizing:border-box !important;
       contain: layout paint;
+      opacity: 0;
+      will-change: opacity;
+      transition: opacity 140ms linear;
     }
   </style>
 
@@ -104,6 +107,31 @@
         setTimeout(() => { if (!haveRange) setOuterLengthFallback(); }, 800);
       }
     })();
+  </script>
+
+  <script>
+    // Reveal the viewer only when Spline reports the scene is fully loaded
+    customElements.whenDefined('spline-viewer').then(() => {
+      const viewer = document.getElementById('viewer');
+      if (!viewer) return;
+
+      // Ensure hidden on init or reload
+      viewer.style.opacity = '0';
+
+      // Spline-documented lifecycle events
+      viewer.addEventListener('load-start', () => {
+        viewer.style.opacity = '0';
+      });
+
+      viewer.addEventListener('load-complete', () => {
+        // Two RAFs to ensure a stable paint before revealing
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            viewer.style.opacity = '1';
+          });
+        });
+      });
+    });
   </script>
 </body>
 </html>
