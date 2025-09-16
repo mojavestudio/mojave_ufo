@@ -63,9 +63,17 @@
       const sticky = document.getElementById('sticky');
       const cover  = document.getElementById('cover');
       const viewer = document.getElementById('viewer');
-      const SCENE_URL = './scene.splinecode';
+      // Build absolute URLs so the viewer (which uses an internal iframe) can fetch correctly
+      const SITE_BASE = new URL('./', location.href).href; // e.g. https://.../mojave_ufo/
+      // Default scene (used only when no explicit params are provided)
+      const SCENE_URL = SITE_BASE + 'scene.splinecode';
+      // Optional: pass both to let the page auto-pick by width
       const URL_MOBILE  = qp.get('urlMobile') || '';
       const URL_DESKTOP = qp.get('urlDesktop') || '';
+      // Force a breakpoint via link: ?bp=mobile or ?bp=desktop
+      const BP = (qp.get('bp') || '').toLowerCase();
+      const MOBILE_SCENE  = SITE_BASE + 'mojave_ufo%20Mobile/public/scene.splinecode';
+      const DESKTOP_SCENE = SITE_BASE + 'scene-desktop.splinecode';
       const BP_WIDTH = parseFloat(qp.get('bpWidth') || '768');
 
       // --- 1) PIXEL-LOCK the sticky container (no vh/svh volatility) ---
@@ -130,12 +138,18 @@
           if (overrideUrl) {
             finalUrl = overrideUrl;
             mode = 'override';
+          } else if (BP === 'mobile') {
+            finalUrl = MOBILE_SCENE;
+            mode = 'mobile:forced';
+          } else if (BP === 'desktop') {
+            finalUrl = DESKTOP_SCENE;
+            mode = 'desktop:forced';
           } else if (URL_MOBILE || URL_DESKTOP) {
             const isMobile = width <= BP_WIDTH;
             finalUrl = isMobile
               ? (URL_MOBILE || URL_DESKTOP || SCENE_URL)
               : (URL_DESKTOP || URL_MOBILE || SCENE_URL);
-            mode = isMobile ? 'mobile' : 'desktop';
+            mode = isMobile ? 'mobile:auto' : 'desktop:auto';
           }
           try { viewer.setAttribute('url', finalUrl); } catch {}
           ro.disconnect();
