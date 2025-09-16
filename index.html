@@ -19,16 +19,8 @@
     #sticky { position:sticky; top:0; width:100vw; /* height set via JS lock */ }
 
     /* Absolutely cover the sticky box so internal reflow can't move layout */
-    .cover { position:absolute; inset:0; }
-
-    /* Veil fully covers during hydration, then fades away */
-    #veil {
-      position:absolute; inset:0;
-      background:#000;
-      opacity:1;
-      transition:opacity 140ms linear;
-      pointer-events:none;
-    }
+    .cover { position:absolute; inset:0; visibility:hidden; }
+    .cover.ready { visibility:visible; }
 
     /* Fill the sticky box pre/post hydration */
     spline-viewer {
@@ -44,7 +36,7 @@
 
   <section id="outer">
     <div id="sticky">
-      <div class="cover">
+      <div class="cover" id="cover">
         <spline-viewer
           id="viewer"
           url="./scene.splinecode"
@@ -58,86 +50,110 @@
 
   <script>
     (function () {
-      console.info('[mojave_ufo] child v12 loaded', new Date().toISOString());
+      const t0 = performance.now();
+      const log = (...a) => console.log('[mojave_ufo]', ...a);
 
       const qp     = new URLSearchParams(location.search);
       const outer  = document.getElementById('outer');
       const sticky = document.getElementById('sticky');
+      const cover  = document.getElementById('cover');
+      const viewer = document.getElementById('viewer');
 
-      // 1) Lock the sticky box to a concrete pixel height immediately.
-      const vpH = () => Math.round((window.visualViewport?.height || window.innerHeight) || 0);
-      function lockSticky(px) { sticky.style.height = px + 'px'; return px; }
+      // --- 1) PIXEL-LOCK the sticky container (no vh/svh volatility) ---
+      const vpH = () => Math.round((visualViewport?.height || innerHeight) || 0);
+      function lockSticky(px){ sticky.style.height = px + 'px'; return px; }
       let lockedVp = lockSticky(vpH());
+      log('lockSticky', { lockedVp, t: (performance.now()-t0).toFixed(1)+'ms' });
 
-      // 2) Provide a sane scroll length even if no parent sync is used.
-      function setOuterLengthFallback() {
+      // --- 2) Provide internal scroll length BEFORE any paint (standalone fallback) ---
+      function setOuterFallback(){
         const px = parseInt(qp.get('scrollpx') || '0', 10);
         if (px) { outer.style.height = px + 'px'; return; }
-        const mult = parseFloat(qp.get('scrollvh') || '170', 10); // default 170vh
+        const mult = parseFloat(qp.get('scrollvh') || '170', 10);
         outer.style.height = Math.round(lockedVp * (mult / 100)) + 'px';
       }
-      setOuterLengthFallback();
+      setOuterFallback();
 
-      // 3) Only re-lock when the viewport really changes (avoid iOS toolbar jitter).
-      let raf = 0, lastUpdate = Date.now();
-      function maybeRelock(force=false) {
+      // Only re-lock on REAL resizes (orientation / big delta)
+      let raf = 0, last = Date.now();
+      function maybeRelock(force=false){
         cancelAnimationFrame(raf);
         raf = requestAnimationFrame(() => {
-          const curr = vpH();
-          const delta = Math.abs(curr - lockedVp);
-          const enoughTime = Date.now() - lastUpdate > 300;
-          if (force || (delta >= 48 && enoughTime)) {
+          const curr = vpH(), delta = Math.abs(curr - lockedVp);
+          const enough = Date.now() - last > 300;
+          if (force || (delta >= 48 && enough)) {
             lockedVp = lockSticky(curr);
-            setOuterLengthFallback();
-            lastUpdate = Date.now();
+            // Recompute fallback only if we’re not in external mode or never got a range
+            if (qp.get('external') !== '1' || !gotRange) setOuterFallback();
+            last = Date.now();
+            log('relock', { lockedVp, delta, t: (performance.now()-t0).toFixed(1)+'ms' });
           }
         });
       }
-      window.addEventListener('orientationchange', () => maybeRelock(true), { passive:true });
-      window.visualViewport?.addEventListener('resize', () => maybeRelock(false), { passive:true });
-      window.addEventListener('resize', () => maybeRelock(false), { passive:true });
+      addEventListener('orientationchange', () => maybeRelock(true), { passive:true });
+      visualViewport?.addEventListener('resize', () => maybeRelock(false), { passive:true });
+      addEventListener('resize', () => maybeRelock(false), { passive:true });
 
-      // 4) Optional: parent<->child range/progress sync when you use ?external=1
-      let haveRange = false;
-      function askParent() { try { parent?.postMessage({ type:'HELLO_FROM_CHILD', v:12 }, '*'); } catch {} }
+      // --- 3) Gate visibility: reveal only when everything is ready ---
+      let gotLoad = false, gotRange = false, gotProgress = false;
+      let rangePx = 0;
 
-      window.addEventListener('message', (e) => {
-        const d = e?.data; if (!d) return;
-        if (d.type === 'SCROLL_RANGE' && Number.isFinite(d.rangePx)) {
-          haveRange = true;
-          outer.style.height = (Math.max(0, d.rangePx) + lockedVp) + 'px';
-        } else if (d.type === 'SCROLL_PROGRESS' && Number.isFinite(d.progress)) {
-          const max = document.documentElement.scrollHeight - lockedVp;
-          document.documentElement.scrollTop = d.progress * Math.max(0, max);
+      function tryReveal() {
+        if (!gotLoad) return;
+        if (qp.get('external') === '1' && !(gotRange && gotProgress)) return;
+
+        if (gotRange) {
+          outer.style.height = (rangePx + lockedVp) + 'px';
         }
-      });
 
-      if (qp.get('external') === '1') {
-        askParent();
-        window.addEventListener('load', askParent, { once:true });
-        setTimeout(() => { if (!haveRange) setOuterLengthFallback(); }, 800);
-      }
-    })();
-  </script>
-
-  <script>
-    // Reveal the viewer only when Spline reports the scene is fully loaded (veil fade)
-    customElements.whenDefined('spline-viewer').then(() => {
-      const viewer = document.getElementById('viewer');
-      const veil   = document.getElementById('veil');
-      if (!viewer || !veil) return;
-
-      // Ensure the veil is covering initially
-      veil.style.opacity = '1';
-
-      // Spline lifecycle
-      viewer.addEventListener('load-start', () => { veil.style.opacity = '1'; });
-      viewer.addEventListener('load-complete', () => {
         requestAnimationFrame(() => {
-          requestAnimationFrame(() => { veil.style.opacity = '0'; });
+          requestAnimationFrame(() => {
+            cover.classList.add('ready');
+            log('REVEAL', { t: (performance.now()-t0).toFixed(1)+'ms' });
+          });
+        });
+      }
+
+      // Spline lifecycle events
+      customElements.whenDefined('spline-viewer').then(() => {
+        viewer.addEventListener('load-start', () => log('load-start', (performance.now()-t0).toFixed(1)+'ms'));
+        viewer.addEventListener('load-complete', () => {
+          gotLoad = true;
+          log('load-complete', (performance.now()-t0).toFixed(1)+'ms');
+          tryReveal();
         });
       });
-    });
+
+      // --- 4) Parent ↔ child bridge for ?external=1 (wait for BOTH signals) ---
+      if (qp.get('external') === '1') {
+        function pingParent(){ try { parent?.postMessage({ type:'HELLO_FROM_CHILD', v:13 }, '*'); } catch {} }
+        addEventListener('message', (e) => {
+          const d = e?.data; if (!d) return;
+          if (d.type === 'SCROLL_RANGE' && Number.isFinite(d.rangePx)) {
+            rangePx = Math.max(0, d.rangePx);
+            gotRange = true;
+            log('SCROLL_RANGE', { rangePx, t: (performance.now()-t0).toFixed(1)+'ms' });
+            tryReveal();
+          } else if (d.type === 'SCROLL_PROGRESS' && Number.isFinite(d.progress)) {
+            gotProgress = true;
+            if (cover.classList.contains('ready')) {
+              const max = document.documentElement.scrollHeight - lockedVp;
+              document.documentElement.scrollTop = d.progress * Math.max(0, max);
+            }
+            log('SCROLL_PROGRESS', { progress: d.progress.toFixed(3), t: (performance.now()-t0).toFixed(1)+'ms' });
+            tryReveal();
+          }
+        });
+        pingParent();
+        addEventListener('load', pingParent, { once:true });
+        setTimeout(() => {
+          if (!(gotRange && gotProgress)) {
+            log('no parent reply → fallback', (performance.now()-t0).toFixed(1)+'ms');
+            tryReveal();
+          }
+        }, 1000);
+      }
+    })();
   </script>
 </body>
 </html>
