@@ -6,44 +6,47 @@
 </head>
 <body>
   <div id="ufo-wrap" style="position:relative;width:100%;min-height:1px;">
-    <iframe
-      id="ufo"
-      src="https://mojavestudio.github.io/mojave_ufo/?external=0&v=14"
-      loading="eager"
-      allow="xr-spatial-tracking; fullscreen; gyroscope; accelerometer"
-      style="
-        display:block;border:0;width:100%;
-        height:1px; /* will be set by script below */
-        max-width:none; box-sizing:border-box;
-        /* dvh fixes initial mobile viewport mismatch without touching <head> */
-        min-height:100dvh; min-height:100svh; min-height:100vh;
-      "
-    ></iframe>
+    <div id="ufo-sticky" style="position:sticky;top:0;width:100%;height:1px;"></div>
+    <div id="ufo-slot" style="position:absolute;inset:0;"></div>
 
     <script>
       (function () {
-        const ifr  = document.getElementById('ufo');
-        const wrap = document.getElementById('ufo-wrap');
+        const wrap   = document.getElementById('ufo-wrap');
+        const sticky = document.getElementById('ufo-sticky');
+        const slot   = document.getElementById('ufo-slot');
 
-        // lock to real visual viewport in px; debounce resize
+        // Lock to real visual viewport in px
         const vpH = () => Math.round((window.visualViewport?.height || window.innerHeight) || 0);
-        let raf = 0;
-
         function lock(force) {
-          cancelAnimationFrame(raf);
-          raf = requestAnimationFrame(() => {
-            const h = vpH();
-            if (force || h) {
-              ifr.style.height  = h + 'px';
-              wrap.style.height = h + 'px';
-            }
-          });
+          const h = vpH();
+          if (force || h) {
+            sticky.style.height = h + 'px';
+            wrap.style.height   = h + 'px';
+          }
         }
-
         lock(true);
         addEventListener('resize', () => lock(false), { passive: true });
         visualViewport?.addEventListener('resize', () => lock(false), { passive: true });
         addEventListener('orientationchange', () => lock(true), { passive: true });
+
+        // Create the iframe only after wrapper is non-zero for 2 consecutive frames
+        let stable = 0, created = false;
+        const ro = new ResizeObserver(([entry]) => {
+          const { width, height } = entry.contentRect;
+          if (width > 0 && height > 0) stable++; else stable = 0;
+          if (!created && stable >= 2) {
+            created = true;
+            const ifr = document.createElement('iframe');
+            ifr.allow = 'xr-spatial-tracking; fullscreen; gyroscope; accelerometer';
+            ifr.loading = 'eager';
+            ifr.style.cssText = 'border:0;position:absolute;inset:0;width:100%;height:100%;display:block;'
+              + 'max-width:none;box-sizing:border-box;';
+            ifr.src = 'https://mojavestudio.github.io/mojave_ufo/?external=0&v=14';
+            slot.appendChild(ifr);
+            ro.disconnect();
+          }
+        });
+        ro.observe(wrap);
       })();
     </script>
   </div>
