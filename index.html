@@ -16,7 +16,7 @@
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: transparent; }
 
     /* Always reference the *viewport*, not a parent’s centered layout */
-    #outer  { position: relative; width: 100vw; }
+    #outer  { position: relative; width: 100vw; height: 100vh; } /* Start with 100vh via CSS */
     #sticky { position: sticky; top: 0; width: 100vw; height: 100svh; }
 
     /* Force the host element to be truly fluid (override any default max-width) */
@@ -92,11 +92,9 @@
 
     function applyFallbackHeight() {
       const isExternal = qp.get('external') === '1';
-      if (isExternal && !didReceiveRange) {
-        // In iframe mode, start at exactly 100vh until host tells us range
-        const viewport = window.innerHeight;
-        outer.style.height = viewport + 'px';
-        console.log('External fallback height (no range yet):', viewport);
+      if (isExternal) {
+        // In iframe mode, rely on CSS 100vh initial; no JS override until range
+        console.log('External mode: Using CSS 100vh initial height until SCROLL_RANGE arrives');
         return;
       }
       const px = parseInt(qp.get('scrollpx') || '0', 10);
@@ -147,17 +145,17 @@
       });
 
       const reapply = () => {
+        if (!didReceiveRange) {
+          console.log('Reapply skipped: No SCROLL_RANGE received yet — keeping CSS 100vh');
+          return;
+        }
         const viewport = window.innerHeight;
-        if (didReceiveRange && rangePx != null) {
+        if (rangePx != null) {
           let newHeight = rangePx + viewport;
           const MAX_HEIGHT = 200000;
           newHeight = Math.min(Math.max(newHeight, viewport), MAX_HEIGHT);
           outer.style.height = newHeight + 'px';
           console.log('Reapplying height with range. rangePx:', rangePx, 'innerHeight:', viewport, 'New height:', newHeight);
-        } else {
-          // Still waiting for parent — keep it at 100vh to avoid jumps
-          outer.style.height = viewport + 'px';
-          console.log('Reapplying height without range — clamped to viewport:', viewport);
         }
         // Do not call setSceneUrlOnce() here to avoid reloads
       };
