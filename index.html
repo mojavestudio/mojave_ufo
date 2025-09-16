@@ -21,6 +21,15 @@
     /* Absolutely cover the sticky box so internal reflow can't move layout */
     .cover { position:absolute; inset:0; }
 
+    /* Veil fully covers during hydration, then fades away */
+    #veil {
+      position:absolute; inset:0;
+      background:#000;
+      opacity:1;
+      transition:opacity 140ms linear;
+      pointer-events:none;
+    }
+
     /* Fill the sticky box pre/post hydration */
     spline-viewer {
       display:block !important;
@@ -30,9 +39,6 @@
       min-width:0 !important;
       box-sizing:border-box !important;
       contain: layout paint;
-      opacity: 0;
-      will-change: opacity;
-      transition: opacity 140ms linear;
     }
   </style>
 
@@ -115,25 +121,20 @@
   </script>
 
   <script>
-    // Reveal the viewer only when Spline reports the scene is fully loaded
+    // Reveal the viewer only when Spline reports the scene is fully loaded (veil fade)
     customElements.whenDefined('spline-viewer').then(() => {
       const viewer = document.getElementById('viewer');
-      if (!viewer) return;
+      const veil   = document.getElementById('veil');
+      if (!viewer || !veil) return;
 
-      // Ensure hidden on init or reload
-      viewer.style.opacity = '0';
+      // Ensure the veil is covering initially
+      veil.style.opacity = '1';
 
-      // Spline-documented lifecycle events
-      viewer.addEventListener('load-start', () => {
-        viewer.style.opacity = '0';
-      });
-
+      // Spline lifecycle
+      viewer.addEventListener('load-start', () => { veil.style.opacity = '1'; });
       viewer.addEventListener('load-complete', () => {
-        // Two RAFs to ensure a stable paint before revealing
         requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            viewer.style.opacity = '1';
-          });
+          requestAnimationFrame(() => { veil.style.opacity = '0'; });
         });
       });
     });
