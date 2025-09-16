@@ -16,7 +16,7 @@
   <style>
     html, body { margin:0; background:transparent }
     #outer  { position:relative; width:100vw }
-    #sticky { position:sticky; top:0; width:100vw; /* height set via JS lock */ }
+    #sticky { position:sticky; top:0; width:100vw; height:100vh; height:100svh; }
 
     /* Absolutely cover the sticky box so internal reflow can't move layout */
     .cover { position:absolute; inset:0; visibility:hidden; }
@@ -31,6 +31,12 @@
       min-width:0 !important;
       box-sizing:border-box !important;
       contain: layout paint;
+    }
+    spline-viewer::part(container),
+    spline-viewer::part(canvas){
+      width:100% !important;
+      height:100% !important;
+      max-width:none !important;
     }
   </style>
 
