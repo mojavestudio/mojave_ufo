@@ -32,7 +32,7 @@
     <div id="sticky">
       <spline-viewer
         id="viewer"
-        url="./scene-desktop.splinecode"
+        url="https://mojavestudio.github.io/mojave_ufo/scene-desktop.splinecode"
         events-target="local"
         style="width:100%;height:100%;display:block"
       ></spline-viewer>
@@ -43,6 +43,7 @@
   <script type="module">
     const qp    = new URLSearchParams(location.search);
     const outer = document.getElementById('outer');
+    const viewer = document.getElementById('viewer');
 
     function setOuterHeight() {
       const px = parseInt(qp.get('scrollpx') || '0', 10);
@@ -71,6 +72,12 @@
           });
         }
       });
+    }
+
+    // Allow overriding the scene via query param for quick testing
+    const overrideUrl = qp.get('url');
+    if (overrideUrl) {
+      try { viewer.setAttribute('url', overrideUrl); } catch {}
     }
   </script>
 </body>
