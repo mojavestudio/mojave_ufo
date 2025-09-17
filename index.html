@@ -38,11 +38,21 @@
     })();
     // pick an existing scene; avoid tablet 404
     function pickScene(){
-      // Only one scene file exists in the repo: scene.splinecode
-      return './scene.splinecode';
+      const isMobile = matchMedia('(max-width: 640px)').matches;
+      return isMobile ? './scene-mobile.splinecode' : './scene.splinecode';
     }
     viewer.setAttribute('events-target','global'); // scroll listens to window inside iframe
     viewer.setAttribute('url', pickScene());
+    
+    // Switch scenes on resize/orientation change
+    addEventListener('resize', () => {
+      const next = pickScene();
+      if (viewer.getAttribute('url') !== next) viewer.setAttribute('url', next);
+    });
+    addEventListener('orientationchange', () => {
+      const next = pickScene();
+      if (viewer.getAttribute('url') !== next) viewer.setAttribute('url', next);
+    });
 
     // --- scrolling logic: handshake + fallback ---
     const outer = document.getElementById('outer') || document.body.appendChild(Object.assign(document.createElement('section'),{id:'outer'}));
