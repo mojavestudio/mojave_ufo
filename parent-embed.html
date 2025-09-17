@@ -41,9 +41,38 @@
             ifr.loading = 'eager';
             ifr.style.cssText = 'border:0;position:absolute;inset:0;width:100%;height:100%;display:block;'
               + 'max-width:none;box-sizing:border-box;';
-            ifr.src = 'https://mojavestudio.github.io/mojave_ufo/?external=0&v=14';
+            // Point to the MOBILE repo with external sync enabled
+            ifr.src = 'https://mojavestudio.github.io/UFO-mobile/?external=1&scrollvh=170&v=9';
             slot.appendChild(ifr);
             ro.disconnect();
+
+            // --- Parent ↔ child scroll sync bridge ---
+            function maxScroll(){
+              return Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+            }
+            function sendRange(){
+              try { ifr.contentWindow?.postMessage({ type: 'SCROLL_RANGE', rangePx: maxScroll() }, '*'); } catch {}
+            }
+            function sendProgress(){
+              const max = maxScroll();
+              const progress = max > 0 ? (document.documentElement.scrollTop / max) : 0;
+              try { ifr.contentWindow?.postMessage({ type: 'SCROLL_PROGRESS', progress }, '*'); } catch {}
+            }
+
+            // Respond when the child says hello
+            addEventListener('message', (e) => {
+              const d = e?.data; if (!d) return;
+              if (d.type === 'HELLO_FROM_CHILD') {
+                sendRange();
+                sendProgress();
+              }
+            });
+
+            // Keep the child updated as the parent layout changes
+            const notify = () => { sendRange(); sendProgress(); }
+            addEventListener('scroll', sendProgress, { passive: true });
+            addEventListener('resize', notify, { passive: true });
+            visualViewport?.addEventListener('resize', notify, { passive: true });
           }
         });
         ro.observe(wrap);
