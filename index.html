@@ -10,6 +10,7 @@
   <!-- CSS units fixed: 100vw/100svh (no spaces) -->
 
   <!-- Use your pinned viewer; do NOT load another viewer anywhere else -->
+  <script>if (!window.THREE) window.THREE = {};</script>  <!-- Guard against multiple Three.js -->
   <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
 
 </head>
@@ -59,8 +60,11 @@
         <script type="module">
           const viewer = document.getElementById('viewer');
           async function pickScene() {
-            for (const p of ["scene.splinecode","scene-desktop.splinecode","scene-mobile.splinecode"]) {
-              try { const r = await fetch(p, { method:"HEAD", cache:"no-store" }); if (r.ok) return p; } catch {}
+            for (const p of ["scene.splinecode", "scene-mobile.splinecode", "scene-desktop.splinecode"]) {  // Reordered to prefer existing
+              try { 
+                const r = await fetch(p, { method:"HEAD", cache:"no-store" }); 
+                if (r.ok) return p; 
+              } catch {}  // Silent on failure
             }
             return null;
           }
