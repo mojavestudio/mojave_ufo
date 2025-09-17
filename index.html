@@ -1,120 +1,112 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
-  />
-  <title>Mojave UFO</title>
-  <!-- CSS units fixed: 100vw/100svh (no spaces) -->
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
+    />
+    <title>Mojave UFO</title>
 
-  <!-- Use your pinned viewer; do NOT load another viewer anywhere else -->
-  <script>if (!window.THREE) window.THREE = {};</script>  <!-- Guard against multiple Three.js -->
-  <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
+    <!-- Load Spline Viewer ONCE, guarded -->
+    <script type="module">
+      if (!customElements.get('spline-viewer')) {
+        import('./vendor/spline-viewer/build/spline-viewer.js');
+      }
+    </script>
 
-</head>
-<body>
-  <!-- place this <style> anywhere in the BODY (not head) -->
-  <style>
-    html, body { margin:0; height:100%; background:transparent; }
-    /* full-bleed sticky section */
-    #outer  { position: relative; width: 100vw; }
-    #sticky { position: sticky; top: 0; width: 100vw; height: 100svh; }
-    /* viewer fills the viewport */
-    spline-viewer {
-      display:block !important;
-      width:100vw !important;
-      height:100svh !important;
-      max-width:none !important;
-      min-width:0 !important;
-    }
-    /* hide scrollbar UI (keep scroll API functional) */
-    html { scrollbar-width: none; }
-    ::-webkit-scrollbar { width:0; height:0; }
-  </style>
+    <style>
+      /* Valid units, no spaces */
+      html, body { margin: 0; height: 100%; background: transparent; }
+      #outer  { position: relative; width: 100vw; }
+      #sticky { position: sticky; top: 0; width: 100vw; height: 100svh; }
 
-  <section id="outer">
-    <div id="sticky">
-      <div class="cover" id="cover">
-        <spline-viewer
-          id="viewer"
-          events-target="local"
-          loading="eager"
-          style="display:block;width:100%;height:100%"
-        ></spline-viewer>
+      /* Force the component to fill the viewport cleanly */
+      spline-viewer{
+        width: 100vw !important;
+        height: 100svh !important;
+        max-width: none !important;
+        min-width: 0 !important;
+        display: block !important;
+        box-sizing: border-box !important;
+      }
+      spline-viewer::part(container), spline-viewer::part(canvas){
+        width: 100% !important;
+        height: 100% !important;
+        max-width: none !important;
+      }
+    </style>
+  </head>
+
+  <body>
+    <section id="outer">
+      <div id="sticky">
+        <!-- We will set the URL in script, so we can pick a safe fallback -->
+        <spline-viewer id="viewer" events-target="local"></spline-viewer>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <script type="module">
-    // Ensure viewer custom element is available (safe if already loaded)
-    import "https://unpkg.com/@splinetool/viewer@latest/build/spline-viewer.js";
+    <script type="module">
+      const qp    = new URLSearchParams(location.search);
+      const outer = document.getElementById('outer');
+      const viewer = document.getElementById('viewer');
 
-    const qp       = new URLSearchParams(location.search);
-    const isEmbed  = qp.get('external') === '1';
-    const viewer   = document.getElementById('viewer');
-    const outer    = document.getElementById('outer');
-
-    // --- Never request a missing tablet file: pick what exists ---
-    async function pickScene() {
-      const candidates = [
-        "scene.splinecode",
-        "scene-desktop.splinecode",
-        "scene-mobile.splinecode"
-      ];
-      for (const path of candidates) {
-        try {
-          const r = await fetch(path, { method:"HEAD", cache:"no-store" });
-          if (r.ok) return path;
-        } catch {}
+      // Pick an existing scene. Tablet → fall back to scene.splinecode.
+      function pickScene(){
+        const mobile = matchMedia('(max-width: 640px)').matches;
+        const tablet = matchMedia('(max-width: 1024px)').matches && !mobile;
+        if (mobile) return './scene-mobile.splinecode';
+        if (tablet) return './scene.splinecode';       // no tablet file in repo
+        return './scene-desktop.splinecode';
       }
-      return null;
-    }
+      viewer.setAttribute('url', pickScene());
+      addEventListener('resize', () => {
+        const next = pickScene();
+        if (viewer.getAttribute('url') !== next) viewer.setAttribute('url', next);
+      });
 
-    // --- Only create fallback height when NOT embedded ---
-    function applyFallbackHeight() {
-      const px = parseInt(qp.get('scrollpx') || '0', 10);
-      if (px) {
-        outer.style.height = px + 'px';
-      } else {
-        const vh   = parseFloat(qp.get('scrollvh') || '170');
-        const unit = (window.visualViewport?.height || window.innerHeight || 1) / 100;
-        outer.style.height = (vh * unit) + 'px';
+      // Fallback: set section height so the iframe can scroll internally
+      function applyFallbackHeight(){
+        const px = parseInt(qp.get('scrollpx') || '0', 10);
+        if (px) {
+          outer.style.height = px + 'px';
+        } else {
+          const vh = parseFloat(qp.get('scrollvh') || '170'); // default sticky length
+          const unit = (window.visualViewport?.height || window.innerHeight) / 100;
+          outer.style.height = (vh * unit) + 'px';
+        }
       }
-    }
-    if (!isEmbed) applyFallbackHeight();
+      applyFallbackHeight();
 
-    // --- Parent ↔ Child handshake & scroll sync ---
-    // Tell the parent "I'm ready" (Framer will attach to THIS iframe)
-    function hello() {
-      try { window.parent.postMessage({ type: "UFO_HELLO" }, "*"); } catch {}
-    }
-    hello();                    // initial ping
-    window.addEventListener('load', hello); // ping again after load
+      // Parent → child scroll sync (for Framer embed with ?external=1)
+      let rangePx = null;
+      if (qp.get('external') === '1') {
+        addEventListener('message', (e) => {
+          const d = e?.data;
+          if (!d) return;
 
-    // Receive scroll range + progress from parent
-    let lastRange = null;
-    window.addEventListener('message', (e) => {
-      const d = e.data || {};
-      if (d.type === 'SCROLL_RANGE' && typeof d.rangePx === 'number') {
-        lastRange = d.rangePx;
-        // Make our outer height match the parent's driving range + 1 viewport
-        outer.style.height = (lastRange + (window.innerHeight || 0)) + 'px';
+          if (d.type === 'SCROLL_RANGE' && Number.isFinite(d.rangePx)) {
+            rangePx = Math.max(0, d.rangePx);
+            outer.style.height = (rangePx + window.innerHeight) + 'px';
+          }
+
+          if (d.type === 'SCROLL_PROGRESS' && Number.isFinite(d.progress)) {
+            // Drive this document's scroll, which the Spline viewer listens to
+            const max = Math.max(
+              0,
+              document.documentElement.scrollHeight - window.innerHeight
+            );
+            window.scrollTo(0, d.progress * max);
+          }
+        });
+
+        const reapply = () => {
+          if (rangePx != null) outer.style.height = (rangePx + window.innerHeight) + 'px';
+        };
+        window.visualViewport?.addEventListener('resize', reapply);
+        addEventListener('orientationchange', reapply);
+        addEventListener('resize', reapply);
       }
-      if (d.type === 'SCROLL_PROGRESS' && typeof d.progress === 'number') {
-        // Drive our internal scroll position (what your lockSticky uses)
-        const max = Math.max(0, (document.documentElement.scrollHeight - window.innerHeight));
-        document.documentElement.scrollTop = d.progress * max;
-      }
-    }, { passive: true });
-
-    // --- Load a valid scene and render ---
-    (async () => {
-      const url = await pickScene();
-      if (url) viewer.setAttribute('url', url);
-    })();
-  </script>
-  
-</body>
+    </script>
+  </body>
 </html>
