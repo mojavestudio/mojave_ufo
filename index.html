@@ -17,35 +17,21 @@
 <body>
   <!-- place this <style> anywhere in the BODY (not head) -->
   <style>
-    html, body { margin:0; height:100%; background:transparent; overflow:hidden; }
-    #outer  { position:relative; width:100vw; overflow:hidden; }
-    #sticky { position:sticky; top:0; width:100vw; height:100vh; height:100svh; overflow:hidden; }
-
-    /* Absolutely cover the sticky box so internal reflow can't move layout */
-    .cover { position:absolute; inset:0; visibility:hidden; }
-    .cover.ready { visibility:visible; }
-
-    /* Fill the sticky box pre/post hydration */
+    html, body { margin:0; height:100%; background:transparent; }
+    /* full-bleed sticky section */
+    #outer  { position: relative; width: 100vw; }
+    #sticky { position: sticky; top: 0; width: 100vw; height: 100svh; }
+    /* viewer fills the viewport */
     spline-viewer {
       display:block !important;
       width:100vw !important;
       height:100svh !important;
       max-width:none !important;
       min-width:0 !important;
-      box-sizing:border-box !important;
-      contain: layout paint;
-      opacity:1 !important;
-      visibility:visible !important;
     }
-    /* Hide scrollbar UI without disabling scrolling logic */
-    html { scrollbar-width: none; }                 /* Firefox */
-    ::-webkit-scrollbar { width: 0; height: 0; }    /* WebKit */
-    spline-viewer::part(container),
-    spline-viewer::part(canvas){
-      width:100% !important;
-      height:100% !important;
-      max-width:none !important;
-    }
+    /* hide scrollbar UI (keep scroll API functional) */
+    html { scrollbar-width: none; }
+    ::-webkit-scrollbar { width:0; height:0; }
   </style>
 
   <section id="outer">
@@ -57,198 +43,76 @@
           loading="eager"
           style="display:block;width:100%;height:100%"
         ></spline-viewer>
-        <script type="module">
-          const viewer = document.getElementById('viewer');
-          async function pickScene() {
-            for (const p of ["scene.splinecode", "scene-mobile.splinecode", "scene-desktop.splinecode"]) {  // Reordered to prefer existing
-              try { 
-                const r = await fetch(p, { method:"HEAD", cache:"no-store" }); 
-                if (r.ok) return p; 
-              } catch {}  // Silent on failure
-            }
-            return null;
-          }
-          (async () => {
-            const chosen = await pickScene();
-            if (chosen) viewer.setAttribute("url", chosen);
-          })();
-        </script>
       </div>
     </div>
   </section>
 
-  <script>
-    (function () {
-      const t0 = performance.now();
-      const log = (...a) => console.log('[mojave_ufo]', ...a);
+  <script type="module">
+    // Ensure viewer custom element is available (safe if already loaded)
+    import "https://unpkg.com/@splinetool/viewer@latest/build/spline-viewer.js";
 
-      const qp     = new URLSearchParams(location.search);
-      const outer  = document.getElementById('outer');
-      const sticky = document.getElementById('sticky');
-      const cover  = document.getElementById('cover');
-      const viewer = document.getElementById('viewer');
-      // Build absolute URLs so the viewer (which uses an internal iframe) can fetch correctly
-      const SITE_BASE = new URL('./', location.href).href; // e.g. https://.../mojave_ufo/
-      // Default scene (used only when no explicit params are provided)
-      const SCENE_URL = SITE_BASE + 'scene.splinecode';
-      // Optional: pass both to let the page auto-pick by width
-      const URL_MOBILE  = qp.get('urlMobile') || '';
-      const URL_DESKTOP = qp.get('urlDesktop') || '';
-      // Force a breakpoint via link: ?bp=mobile or ?bp=desktop
-      const BP = (qp.get('bp') || '').toLowerCase();
-      const MOBILE_SCENE  = SCENE_URL;
-      const DESKTOP_SCENE = SCENE_URL;
-      const BP_WIDTH = parseFloat(qp.get('bpWidth') || '768');
+    const qp       = new URLSearchParams(location.search);
+    const isEmbed  = qp.get('external') === '1';
+    const viewer   = document.getElementById('viewer');
+    const outer    = document.getElementById('outer');
 
-      // --- 1) PIXEL-LOCK the sticky container (no vh/svh volatility) ---
-      const vpH = () => Math.round((visualViewport?.height || innerHeight) || 0);
-      function lockSticky(px){ sticky.style.height = px + 'px'; return px; }
-      let lockedVp = lockSticky(vpH());
-      log('lockSticky', { lockedVp, t: (performance.now()-t0).toFixed(1)+'ms' });
-
-      // --- 2) Provide internal scroll length BEFORE any paint (standalone fallback) ---
-      function setOuterFallback(){
-        const px = parseInt(qp.get('scrollpx') || '0', 10);
-        if (px) { outer.style.height = px + 'px'; return; }
-        const mult = parseFloat(qp.get('scrollvh') || '170', 10);
-        outer.style.height = Math.round(lockedVp * (mult / 100)) + 'px';
+    // --- Never request a missing tablet file: pick what exists ---
+    async function pickScene() {
+      const candidates = [
+        "scene.splinecode",
+        "scene-desktop.splinecode",
+        "scene-mobile.splinecode"
+      ];
+      for (const path of candidates) {
+        try {
+          const r = await fetch(path, { method:"HEAD", cache:"no-store" });
+          if (r.ok) return path;
+        } catch {}
       }
-      // Only apply fallback height when NOT embedded (prevents iframe scrollbar)
-      const isExternal = qp.get('external') === '1';
-      if (!isExternal) {
-        setOuterFallback();
+      return null;
+    }
+
+    // --- Only create fallback height when NOT embedded ---
+    function applyFallbackHeight() {
+      const px = parseInt(qp.get('scrollpx') || '0', 10);
+      if (px) {
+        outer.style.height = px + 'px';
+      } else {
+        const vh   = parseFloat(qp.get('scrollvh') || '170');
+        const unit = (window.visualViewport?.height || window.innerHeight || 1) / 100;
+        outer.style.height = (vh * unit) + 'px';
       }
+    }
+    if (!isEmbed) applyFallbackHeight();
 
-      // Only re-lock on REAL resizes (orientation / big delta)
-      let raf = 0, last = Date.now();
-      function maybeRelock(force=false){
-        cancelAnimationFrame(raf);
-        raf = requestAnimationFrame(() => {
-          const curr = vpH(), delta = Math.abs(curr - lockedVp);
-          const enough = Date.now() - last > 300;
-          if (force || (delta >= 48 && enough)) {
-            lockedVp = lockSticky(curr);
-            // Recompute fallback only if we're not in external mode or never got a range
-            if (!isExternal || !gotRange) {
-              if (!isExternal) {
-                setOuterFallback();
-              }
-            }
-            last = Date.now();
-            log('relock', { lockedVp, delta, t: (performance.now()-t0).toFixed(1)+'ms' });
-          }
-        });
+    // --- Parent ↔ Child handshake & scroll sync ---
+    // Tell the parent "I'm ready" (Framer will attach to THIS iframe)
+    function hello() {
+      try { window.parent.postMessage({ type: "UFO_HELLO" }, "*"); } catch {}
+    }
+    hello();                    // initial ping
+    window.addEventListener('load', hello); // ping again after load
+
+    // Receive scroll range + progress from parent
+    let lastRange = null;
+    window.addEventListener('message', (e) => {
+      const d = e.data || {};
+      if (d.type === 'SCROLL_RANGE' && typeof d.rangePx === 'number') {
+        lastRange = d.rangePx;
+        // Make our outer height match the parent's driving range + 1 viewport
+        outer.style.height = (lastRange + (window.innerHeight || 0)) + 'px';
       }
-      addEventListener('orientationchange', () => maybeRelock(true), { passive:true });
-      visualViewport?.addEventListener('resize', () => maybeRelock(false), { passive:true });
-      addEventListener('resize', () => maybeRelock(false), { passive:true });
-
-      // --- 3) Gate loading: wait for stable non-zero size, then set URL ---
-      let urlSet = false;
-      let stableFrames = 0;
-      let prevW = 0, prevH = 0;
-      const tolerance = 0.5; // px
-      const ro = new ResizeObserver((entries) => {
-        const rect = entries[0]?.contentRect;
-        if (!rect) return;
-        const { width, height } = rect;
-        const wStable = Math.abs(width - prevW) <= tolerance;
-        const hStable = Math.abs(height - prevH) <= tolerance;
-        if (width > 0 && height > 0 && wStable && hStable) {
-          stableFrames++;
-        } else {
-          stableFrames = 0;
-        }
-        prevW = width; prevH = height;
-        if (!urlSet && stableFrames >= 2) {
-          urlSet = true;
-          // Allow quick override via ?url= for testing
-          const overrideUrl = qp.get('url');
-          let finalUrl = SCENE_URL;
-          let mode = 'default';
-
-          if (overrideUrl) {
-            finalUrl = overrideUrl;
-            mode = 'override';
-          } else if (BP === 'mobile') {
-            finalUrl = MOBILE_SCENE;
-            mode = 'mobile:forced';
-          } else if (BP === 'desktop') {
-            finalUrl = DESKTOP_SCENE;
-            mode = 'desktop:forced';
-          } else if (URL_MOBILE || URL_DESKTOP) {
-            const isMobile = width <= BP_WIDTH;
-            finalUrl = isMobile
-              ? (URL_MOBILE || URL_DESKTOP || SCENE_URL)
-              : (URL_DESKTOP || URL_MOBILE || SCENE_URL);
-            mode = isMobile ? 'mobile:auto' : 'desktop:auto';
-          }
-          try { viewer.setAttribute('url', finalUrl); } catch {}
-          ro.disconnect();
-          log('set url', { finalUrl, mode, bp: BP_WIDTH, width, height, t: (performance.now()-t0).toFixed(1)+'ms' });
-        }
-      });
-      ro.observe(sticky);
-
-      // --- 4) Gate visibility: reveal only when everything is ready ---
-      let gotLoad = false, gotRange = false, gotProgress = false;
-      let rangePx = 0;
-
-      function tryReveal() {
-        if (!gotLoad) return;
-        if (isExternal && !(gotRange && gotProgress)) return;
-
-        if (gotRange) {
-          outer.style.height = (rangePx + lockedVp) + 'px';
-        }
-
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            cover.classList.add('ready');
-            log('REVEAL', { t: (performance.now()-t0).toFixed(1)+'ms' });
-          });
-        });
+      if (d.type === 'SCROLL_PROGRESS' && typeof d.progress === 'number') {
+        // Drive our internal scroll position (what your lockSticky uses)
+        const max = Math.max(0, (document.documentElement.scrollHeight - window.innerHeight));
+        document.documentElement.scrollTop = d.progress * max;
       }
+    }, { passive: true });
 
-      // Spline lifecycle events
-      customElements.whenDefined('spline-viewer').then(() => {
-        viewer.addEventListener('load-start', () => log('load-start', (performance.now()-t0).toFixed(1)+'ms'));
-        viewer.addEventListener('load-complete', () => {
-          gotLoad = true;
-          log('load-complete', (performance.now()-t0).toFixed(1)+'ms');
-          tryReveal();
-        });
-      });
-
-      // --- 5) Parent ↔ child bridge for ?external=1 (wait for BOTH signals) ---
-      if (isExternal) {
-        function pingParent(){ try { parent?.postMessage({ type:'HELLO_FROM_CHILD', v:13 }, '*'); } catch {} }
-        addEventListener('message', (e) => {
-          const d = e?.data; if (!d) return;
-          if (d.type === 'SCROLL_RANGE' && Number.isFinite(d.rangePx)) {
-            rangePx = Math.max(0, d.rangePx);
-            gotRange = true;
-            log('SCROLL_RANGE', { rangePx, t: (performance.now()-t0).toFixed(1)+'ms' });
-            tryReveal();
-          } else if (d.type === 'SCROLL_PROGRESS' && Number.isFinite(d.progress)) {
-            gotProgress = true;
-            if (cover.classList.contains('ready')) {
-              const max = document.documentElement.scrollHeight - lockedVp;
-              document.documentElement.scrollTop = d.progress * Math.max(0, max);
-            }
-            log('SCROLL_PROGRESS', { progress: d.progress.toFixed(3), t: (performance.now()-t0).toFixed(1)+'ms' });
-            tryReveal();
-          }
-        });
-        pingParent();
-        addEventListener('load', pingParent, { once:true });
-        setTimeout(() => {
-          if (!(gotRange && gotProgress)) {
-            log('no parent reply → fallback', (performance.now()-t0).toFixed(1)+'ms');
-            tryReveal();
-          }
-        }, 1000);
-      }
+    // --- Load a valid scene and render ---
+    (async () => {
+      const url = await pickScene();
+      if (url) viewer.setAttribute('url', url);
     })();
   </script>
   <script type="module">
