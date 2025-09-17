@@ -12,36 +12,6 @@
   <!-- Use your pinned viewer; do NOT load another viewer anywhere else -->
   <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
 
-  <!-- Disable any inner scrolling when embedded -->
-  <script>
-    (function () {
-      const qp = new URLSearchParams(location.search);
-      if (qp.get('external') !== '1') return;
-
-      const s = document.createElement('style');
-      s.textContent = `
-        html, body { margin:0; height:100%; overflow:hidden !important; background:transparent; }
-        /* Pin the container to the viewport so it can never be taller than 1 screen */
-        #outer, #sticky {
-          position: fixed !important;
-          inset: 0 !important;
-          height: auto !important;
-          width: 100% !important;
-          overflow: hidden !important;
-        }
-        /* Make sure the viewer just fills the box */
-        spline-viewer {
-          display:block !important;
-          width:100% !important;
-          height:100% !important;
-        }
-        /* Hide any residual scrollbars (belt & suspenders) */
-        :root { scrollbar-width: none; }
-        ::-webkit-scrollbar { width:0; height:0; }
-      `;
-      document.head.appendChild(s);
-    })();
-  </script>
 </head>
 <body>
   <!-- place this <style> anywhere in the BODY (not head) -->
@@ -127,11 +97,9 @@
         outer.style.height = Math.round(lockedVp * (mult / 100)) + 'px';
       }
       // Only apply fallback height when NOT embedded (prevents iframe scrollbar)
-      if (qp.get('external') !== '1') {
+      const isExternal = qp.get('external') === '1';
+      if (!isExternal) {
         setOuterFallback();
-      } else {
-        // When embedded, keep iframe doc exactly 1 viewport tall
-        outer.style.height = lockedVp + 'px';
       }
 
       // Only re-lock on REAL resizes (orientation / big delta)
@@ -144,11 +112,9 @@
           if (force || (delta >= 48 && enough)) {
             lockedVp = lockSticky(curr);
             // Recompute fallback only if we're not in external mode or never got a range
-            if (qp.get('external') !== '1' || !gotRange) {
-              if (qp.get('external') !== '1') {
+            if (!isExternal || !gotRange) {
+              if (!isExternal) {
                 setOuterFallback();
-              } else {
-                outer.style.height = lockedVp + 'px';
               }
             }
             last = Date.now();
@@ -213,7 +179,7 @@
 
       function tryReveal() {
         if (!gotLoad) return;
-        if (qp.get('external') === '1' && !(gotRange && gotProgress)) return;
+        if (isExternal && !(gotRange && gotProgress)) return;
 
         if (gotRange) {
           outer.style.height = (rangePx + lockedVp) + 'px';
@@ -238,7 +204,7 @@
       });
 
       // --- 5) Parent ↔ child bridge for ?external=1 (wait for BOTH signals) ---
-      if (qp.get('external') === '1') {
+      if (isExternal) {
         function pingParent(){ try { parent?.postMessage({ type:'HELLO_FROM_CHILD', v:13 }, '*'); } catch {} }
         addEventListener('message', (e) => {
           const d = e?.data; if (!d) return;
