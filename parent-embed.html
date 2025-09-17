@@ -39,8 +39,9 @@
             const ifr = document.createElement('iframe');
             ifr.allow = 'xr-spatial-tracking; fullscreen; gyroscope; accelerometer';
             ifr.loading = 'eager';
+            ifr.scrolling = 'no';
             ifr.style.cssText = 'border:0;position:absolute;inset:0;width:100%;height:100%;display:block;'
-              + 'max-width:none;box-sizing:border-box;';
+              + 'max-width:none;box-sizing:border-box;overflow:hidden;';
             // Point to the MOBILE repo with external sync enabled
             ifr.src = 'https://mojavestudio.github.io/UFO-mobile/?external=1&scrollvh=170&v=9';
             slot.appendChild(ifr);

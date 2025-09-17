@@ -11,6 +11,37 @@
 
   <!-- Use your pinned viewer; do NOT load another viewer anywhere else -->
   <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
+
+  <!-- Disable any inner scrolling when embedded -->
+  <script>
+    (function () {
+      const qp = new URLSearchParams(location.search);
+      if (qp.get('external') !== '1') return;
+
+      const s = document.createElement('style');
+      s.textContent = `
+        html, body { margin:0; height:100%; overflow:hidden !important; background:transparent; }
+        /* Pin the container to the viewport so it can never be taller than 1 screen */
+        #outer, #sticky {
+          position: fixed !important;
+          inset: 0 !important;
+          height: auto !important;
+          width: 100% !important;
+          overflow: hidden !important;
+        }
+        /* Make sure the viewer just fills the box */
+        spline-viewer {
+          display:block !important;
+          width:100% !important;
+          height:100% !important;
+        }
+        /* Hide any residual scrollbars (belt & suspenders) */
+        :root { scrollbar-width: none; }
+        ::-webkit-scrollbar { width:0; height:0; }
+      `;
+      document.head.appendChild(s);
+    })();
+  </script>
 </head>
 <body>
   <!-- place this <style> anywhere in the BODY (not head) -->
