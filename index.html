@@ -72,8 +72,8 @@
       const URL_DESKTOP = qp.get('urlDesktop') || '';
       // Force a breakpoint via link: ?bp=mobile or ?bp=desktop
       const BP = (qp.get('bp') || '').toLowerCase();
-      const MOBILE_SCENE  = SITE_BASE + 'mojave_ufo%20Mobile/public/scene.splinecode';
-      const DESKTOP_SCENE = SITE_BASE + 'scene-desktop.splinecode';
+      const MOBILE_SCENE  = SCENE_URL;
+      const DESKTOP_SCENE = SCENE_URL;
       const BP_WIDTH = parseFloat(qp.get('bpWidth') || '768');
 
       // --- 1) PIXEL-LOCK the sticky container (no vh/svh volatility) ---
