@@ -15,9 +15,9 @@
 <body>
   <!-- place this <style> anywhere in the BODY (not head) -->
   <style>
-    html, body { margin:0; height:100%; background:transparent }
-    #outer  { position:relative; width:100vw }
-    #sticky { position:sticky; top:0; width:100vw; height:100vh; height:100svh; }
+    html, body { margin:0; height:100%; background:transparent; overflow:hidden; }
+    #outer  { position:relative; width:100vw; overflow:hidden; }
+    #sticky { position:sticky; top:0; width:100vw; height:100vh; height:100svh; overflow:hidden; }
 
     /* Absolutely cover the sticky box so internal reflow can't move layout */
     .cover { position:absolute; inset:0; visibility:hidden; }
@@ -35,6 +35,9 @@
       opacity:1 !important;
       visibility:visible !important;
     }
+    /* Hide scrollbars */
+    :root { scrollbar-width: none; }
+    ::-webkit-scrollbar { width: 0; height: 0; }
     spline-viewer::part(container),
     spline-viewer::part(canvas){
       width:100% !important;
@@ -92,7 +95,13 @@
         const mult = parseFloat(qp.get('scrollvh') || '170', 10);
         outer.style.height = Math.round(lockedVp * (mult / 100)) + 'px';
       }
-      setOuterFallback();
+      // Only apply fallback height when NOT embedded (prevents iframe scrollbar)
+      if (qp.get('external') !== '1') {
+        setOuterFallback();
+      } else {
+        // When embedded, keep iframe doc exactly 1 viewport tall
+        outer.style.height = lockedVp + 'px';
+      }
 
       // Only re-lock on REAL resizes (orientation / big delta)
       let raf = 0, last = Date.now();
@@ -103,8 +112,14 @@
           const enough = Date.now() - last > 300;
           if (force || (delta >= 48 && enough)) {
             lockedVp = lockSticky(curr);
-            // Recompute fallback only if we’re not in external mode or never got a range
-            if (qp.get('external') !== '1' || !gotRange) setOuterFallback();
+            // Recompute fallback only if we're not in external mode or never got a range
+            if (qp.get('external') !== '1' || !gotRange) {
+              if (qp.get('external') !== '1') {
+                setOuterFallback();
+              } else {
+                outer.style.height = lockedVp + 'px';
+              }
+            }
             last = Date.now();
             log('relock', { lockedVp, delta, t: (performance.now()-t0).toFixed(1)+'ms' });
           }
