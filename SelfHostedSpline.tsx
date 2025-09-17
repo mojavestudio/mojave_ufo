@@ -5,6 +5,7 @@ import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 // Lazy import to keep initial render light; React is a peer (no duplicate Reacts)
 const Spline = React.lazy(() => import("@splinetool/react-spline"))
 
+// Extend Props with fit/zoom controls and per-breakpoint sizes
 type Props = {
     /** e.g. https://mojavestudio.github.io/mojave_ufo/ (must end with / or we'll add it) */
     gitHubBaseUrl: string
@@ -28,11 +29,24 @@ type Props = {
     mountWhenInView: boolean
     preflightCheck: boolean
 
-    /** Per-breakpoint zoom */
+    /** Per-breakpoint zoom (used when fitMode === "none") */
     mobileZoom: number
     tabletZoom: number
     desktopZoom: number
-    
+
+    /** Fit/zoom logic */
+    fitMode: "none" | "contain" | "cover"
+    designWidth: number
+    designHeight: number
+    mobileDesignWidth: number
+    mobileDesignHeight: number
+    tabletDesignWidth: number
+    tabletDesignHeight: number
+    desktopDesignWidth: number
+    desktopDesignHeight: number
+    minZoom: number
+    maxZoom: number
+
     fallbackMessage: string
     className?: string
 }
@@ -58,12 +72,25 @@ export default function SelfHostedSpline(props: Props) {
         tabletZoom = 1,
         desktopZoom = 1,
 
+        fitMode = "contain",
+        designWidth = 1440,
+        designHeight = 900,
+        mobileDesignWidth = 390,
+        mobileDesignHeight = 844,
+        tabletDesignWidth = 834,
+        tabletDesignHeight = 1112,
+        desktopDesignWidth = 1440,
+        desktopDesignHeight = 900,
+        minZoom = 0.25,
+        maxZoom = 3,
+
         fallbackMessage = "Spline scene URL failed to load (404/blocked). Check the path or host.",
         className,
     } = props
 
     const isStatic = useIsStaticRenderer() // don’t spin up WebGL on canvas/static export
-    const ref = React.useRef<HTMLDivElement | null>(null)
+    const hostRef = React.useRef<HTMLDivElement | null>(null)
+    const appRef = React.useRef<any>(null)
 
     const [inView, setInView] = React.useState<boolean>(!mountWhenInView)
     const [resolvedUrl, setResolvedUrl] = React.useState<string>("")
@@ -188,8 +215,8 @@ export default function SelfHostedSpline(props: Props) {
 
     // Mount only when visible to avoid overlapping Three scenes
     React.useEffect(() => {
-        if (!mountWhenInView || !ref.current) return
-        const node = ref.current
+        if (!mountWhenInView || !hostRef.current) return
+        const node = hostRef.current
         const io = new IntersectionObserver(
             ([entry]) => setInView(entry.isIntersecting),
             { root: null, rootMargin: "200px 0px", threshold: 0.01 }
@@ -220,11 +247,46 @@ export default function SelfHostedSpline(props: Props) {
                   WebkitOverflowScrolling: "touch",
               }
 
+    // Fit/zoom calculation
+    const getDesignSize = React.useCallback((): [number, number] => {
+        if (currentBreakpoint === "mobile" && mobileDesignWidth && mobileDesignHeight) return [mobileDesignWidth, mobileDesignHeight]
+        if (currentBreakpoint === "tablet" && tabletDesignWidth && tabletDesignHeight) return [tabletDesignWidth, tabletDesignHeight]
+        if (currentBreakpoint === "desktop" && desktopDesignWidth && desktopDesignHeight) return [desktopDesignWidth, desktopDesignHeight]
+        return [designWidth, designHeight]
+    }, [currentBreakpoint, mobileDesignWidth, mobileDesignHeight, tabletDesignWidth, tabletDesignHeight, desktopDesignWidth, desktopDesignHeight, designWidth, designHeight])
+
+    const applyZoom = React.useCallback(() => {
+        if (!appRef.current || !hostRef.current) return
+        const rect = hostRef.current.getBoundingClientRect()
+        const [dw, dh] = getDesignSize()
+        let next = zoomForBp
+
+        if (fitMode !== "none" && dw > 0 && dh > 0 && rect.width > 0 && rect.height > 0) {
+            const zx = rect.width / dw
+            const zy = rect.height / dh
+            next = fitMode === "contain" ? Math.min(zx, zy) : Math.max(zx, zy)
+        }
+
+        // clamp
+        next = Math.max(minZoom, Math.min(maxZoom, next))
+        try { appRef.current.setZoom(next) } catch {}
+    }, [fitMode, getDesignSize, minZoom, maxZoom, zoomForBp])
+
+    // React to container resize & breakpoint changes
+    React.useEffect(() => {
+        if (!hostRef.current) return
+        const ro = new ResizeObserver(() => applyZoom())
+        ro.observe(hostRef.current)
+        return () => ro.disconnect()
+    }, [applyZoom])
+
+    React.useEffect(() => { applyZoom() }, [currentBreakpoint, applyZoom])
+
     // On static canvas/exports, show a lightweight placeholder
     if (isStatic) {
         return (
             <div
-                ref={ref}
+                ref={hostRef}
                 className={className}
                 style={{ ...style, display: "grid", placeItems: "center" }}
             >
@@ -236,7 +298,7 @@ export default function SelfHostedSpline(props: Props) {
     }
 
     return (
-        <div ref={ref} className={className} style={style}>
+        <div ref={hostRef} className={className} style={style}>
             <React.Suspense
                 fallback={<div style={{ padding: 12 }}>Loading 3D…</div>}
             >
@@ -251,13 +313,8 @@ export default function SelfHostedSpline(props: Props) {
                         scene={resolvedUrl}
                         renderOnDemand={renderOnDemand}
                         onLoad={(app) => {
-                            // Apply per-breakpoint zoom
-                            try {
-                                if (Number.isFinite(zoomForBp) && zoomForBp > 0)
-                                    app.setZoom(zoomForBp)
-                            } catch {
-                                /* ignore */
-                            }
+                            appRef.current = app
+                            applyZoom()
                         }}
                     />
                 ) : null}
@@ -301,7 +358,8 @@ addPropertyControls(SelfHostedSpline, {
         type: ControlType.SegmentedEnum,
         title: "Height Mode",
         options: ["frame", "vh"],
-        optionTitles: ["Fill Frame", "Viewport (vh)"],
+        optionTitles: ["Fill Frame", "Viewport (vh)"]
+        ,
         defaultValue: "vh",
     },
     mobileHeightVh: {
@@ -349,33 +407,32 @@ addPropertyControls(SelfHostedSpline, {
         title: "Check URL (HEAD)",
         defaultValue: true,
     },
-    mobileZoom: {
-        type: ControlType.Number,
-        title: "Mobile Zoom",
-        min: 0.1,
-        max: 5,
-        step: 0.1,
-        displayStepper: true,
-        defaultValue: 1,
+
+    // Fit/zoom controls
+    fitMode: {
+        type: ControlType.Enum,
+        title: "Fit Mode",
+        options: ["none", "contain", "cover"],
+        optionTitles: ["Fixed Zoom", "Contain", "Cover"],
+        defaultValue: "contain",
     },
-    tabletZoom: {
-        type: ControlType.Number,
-        title: "Tablet Zoom",
-        min: 0.1,
-        max: 5,
-        step: 0.1,
-        displayStepper: true,
-        defaultValue: 1,
-    },
-    desktopZoom: {
-        type: ControlType.Number,
-        title: "Desktop Zoom",
-        min: 0.1,
-        max: 5,
-        step: 0.1,
-        displayStepper: true,
-        defaultValue: 1,
-    },
+    designWidth: { type: ControlType.Number, title: "Design W", defaultValue: 1440, min: 100, max: 4000, step: 10 },
+    designHeight: { type: ControlType.Number, title: "Design H", defaultValue: 900, min: 100, max: 4000, step: 10 },
+
+    mobileDesignWidth: { type: ControlType.Number, title: "Mobile W", defaultValue: 390, min: 100, max: 2000, step: 10 },
+    mobileDesignHeight: { type: ControlType.Number, title: "Mobile H", defaultValue: 844, min: 100, max: 2000, step: 10 },
+    tabletDesignWidth: { type: ControlType.Number, title: "Tablet W", defaultValue: 834, min: 100, max: 3000, step: 10 },
+    tabletDesignHeight: { type: ControlType.Number, title: "Tablet H", defaultValue: 1112, min: 100, max: 3000, step: 10 },
+    desktopDesignWidth: { type: ControlType.Number, title: "Desktop W", defaultValue: 1440, min: 100, max: 4000, step: 10 },
+    desktopDesignHeight: { type: ControlType.Number, title: "Desktop H", defaultValue: 900, min: 100, max: 4000, step: 10 },
+
+    minZoom: { type: ControlType.Number, title: "Min Zoom", defaultValue: 0.25, min: 0.05, max: 5, step: 0.05 },
+    maxZoom: { type: ControlType.Number, title: "Max Zoom", defaultValue: 3, min: 0.1, max: 10, step: 0.1 },
+
+    mobileZoom: { type: ControlType.Number, title: "Mobile Zoom", defaultValue: 1, min: 0.1, max: 5, step: 0.1, hidden: (p) => p.fitMode !== "none" },
+    tabletZoom: { type: ControlType.Number, title: "Tablet Zoom", defaultValue: 1, min: 0.1, max: 5, step: 0.1, hidden: (p) => p.fitMode !== "none" },
+    desktopZoom: { type: ControlType.Number, title: "Desktop Zoom", defaultValue: 1, min: 0.1, max: 5, step: 0.1, hidden: (p) => p.fitMode !== "none" },
+
     fallbackMessage: {
         type: ControlType.String,
         title: "Fallback Message",
