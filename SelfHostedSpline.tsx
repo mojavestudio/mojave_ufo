@@ -2,6 +2,15 @@
 import * as React from "react"
 import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
+// tiny debounce via rAF to avoid repeated zoom during layout thrash
+function rafDebounce<T extends (...args: any[]) => void>(fn: T) {
+    let raf = 0
+    return (...args: Parameters<T>) => {
+        if (raf) cancelAnimationFrame(raf)
+        raf = requestAnimationFrame(() => fn(...args))
+    }
+}
+
 // Lazy import to keep initial render light; React is a peer (no duplicate Reacts)
 const Spline = React.lazy(() => import("@splinetool/react-spline"))
 
@@ -91,6 +100,21 @@ export default function SelfHostedSpline(props: Props) {
     const isStatic = useIsStaticRenderer() // don’t spin up WebGL on canvas/static export
     const hostRef = React.useRef<HTMLDivElement | null>(null)
     const appRef = React.useRef<any>(null)
+    const lastSize = React.useRef<{ w: number; h: number }>({ w: 0, h: 0 })
+    const [vhUnit, setVhUnit] = React.useState<"svh" | "lvh" | "vh">("vh")
+
+    React.useEffect(() => {
+        try {
+            // pick the most stable unit the browser supports
+            // @ts-ignore
+            const supports = (prop: string, value: string) => !!(window as any)?.CSS?.supports?.(prop, value)
+            if (supports("height", "100svh")) setVhUnit("svh")
+            else if (supports("height", "100lvh")) setVhUnit("lvh")
+            else setVhUnit("vh")
+        } catch {
+            setVhUnit("vh")
+        }
+    }, [])
 
     const [inView, setInView] = React.useState<boolean>(!mountWhenInView)
     const [resolvedUrl, setResolvedUrl] = React.useState<string>("")
@@ -225,15 +249,8 @@ export default function SelfHostedSpline(props: Props) {
         return () => io.disconnect()
     }, [mountWhenInView])
 
-    // Use dvh/svh fallback to fix mobile vh bugs
-    const supportsDVH = typeof CSS !== "undefined" && CSS.supports("height", "100dvh")
-    const supportsSVH = typeof CSS !== "undefined" && CSS.supports("height", "100svh")
-
-    const heightStr = supportsDVH
-        ? `${heightForBp}dvh`
-        : supportsSVH
-        ? `${heightForBp}svh`
-        : `${heightForBp}vh`
+    // Use stable viewport units on mobile (svh/lvh) with vh fallback
+    const heightStr = `${heightForBp}${vhUnit}`
 
     // Sizing: either fill the Framer frame, or use responsive vh with modern viewport units
     const style: React.CSSProperties =
@@ -255,9 +272,16 @@ export default function SelfHostedSpline(props: Props) {
         return [designWidth, designHeight]
     }, [currentBreakpoint, mobileDesignWidth, mobileDesignHeight, tabletDesignWidth, tabletDesignHeight, desktopDesignWidth, desktopDesignHeight, designWidth, designHeight])
 
-    const applyZoom = React.useCallback(() => {
+    const _applyZoom = React.useCallback(() => {
         if (!appRef.current || !hostRef.current) return
         const rect = hostRef.current.getBoundingClientRect()
+        // ignore if size hasn't actually changed (prevents micro-jitter)
+        if (
+            Math.abs(rect.width - lastSize.current.w) < 1 &&
+            Math.abs(rect.height - lastSize.current.h) < 1
+        ) return
+        lastSize.current = { w: rect.width, h: rect.height }
+
         const [dw, dh] = getDesignSize()
         let next = zoomForBp
 
@@ -271,6 +295,9 @@ export default function SelfHostedSpline(props: Props) {
         next = Math.max(minZoom, Math.min(maxZoom, next))
         try { appRef.current.setZoom(next) } catch {}
     }, [fitMode, getDesignSize, minZoom, maxZoom, zoomForBp])
+
+    // debounce it so we don’t thrash during initial layout
+    const applyZoom = React.useMemo(() => rafDebounce(_applyZoom), [_applyZoom])
 
     // React to container resize & breakpoint changes
     React.useEffect(() => {
