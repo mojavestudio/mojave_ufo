@@ -1,112 +1,94 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
-    />
-    <title>Mojave UFO</title>
+<head>
+  <meta charset="utf-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
+  />
+  <title>Mojave UFO</title>
 
-    <!-- Load Spline Viewer ONCE, guarded -->
-    <script type="module">
-      if (!customElements.get('spline-viewer')) {
-        import('./vendor/spline-viewer/build/spline-viewer.js');
+  <!-- put this in <head> once; keep it exactly like this -->
+  <script type="module">
+    if (!customElements.get('spline-viewer')) {
+      import('https://unpkg.com/@splinetool/viewer/build/spline-viewer.js');
+    }
+  </script>
+
+  <style>
+    html,body{margin:0;height:100%}
+    #outer{position:relative;width:100vw}
+    #sticky{position:sticky;top:0;width:100vw;height:100svh}
+    spline-viewer{width:100vw;height:100svh;display:block}
+  </style>
+</head>
+
+<body>
+  <section id="outer">
+    <div id="sticky">
+      <spline-viewer id="viewer" events-target="global"></spline-viewer>
+    </div>
+  </section>
+
+  <!-- put this just before </body> -->
+  <script type="module">
+    const qp = new URLSearchParams(location.search);
+    const viewer = document.querySelector('spline-viewer') || (() => {
+      const v = document.createElement('spline-viewer'); v.setAttribute('events-target','global'); return document.body.appendChild(v);
+    })();
+    // pick an existing scene; avoid tablet 404
+    function pickScene(){
+      const m = matchMedia('(max-width:640px)').matches;
+      const t = matchMedia('(max-width:1024px)').matches && !m;
+      return m ? './scene-mobile.splinecode' : (t ? './scene.splinecode' : './scene-desktop.splinecode');
+    }
+    viewer.setAttribute('events-target','global'); // scroll listens to window inside iframe
+    viewer.setAttribute('url', pickScene());
+    addEventListener('resize', () => {
+      const next = pickScene();
+      if (viewer.getAttribute('url') !== next) viewer.setAttribute('url', next);
+    });
+
+    // --- scrolling logic: handshake + fallback ---
+    const outer = document.getElementById('outer') || document.body.appendChild(Object.assign(document.createElement('section'),{id:'outer'}));
+    const sticky = document.getElementById('sticky') || outer.appendChild(Object.assign(document.createElement('div'),{id:'sticky'}));
+    if (!viewer.parentElement) sticky.appendChild(viewer);
+
+    function setPageHeight(px){ outer.style.height = `${px}px`; }
+    function defaultHeight(){
+      const vh = parseFloat(qp.get('scrollvh') || '170');
+      const unit = (window.visualViewport?.height || innerHeight) / 100;
+      setPageHeight(vh * unit);
+    }
+    defaultHeight();
+
+    let parentOk = false;
+    let rangePx = 0;
+
+    // Ask parent for control. If no reply fast, enable internal scroll so it works alone.
+    function hello(){ parent.postMessage({type:'SPLINE_CHILD_HELLO'}, '*'); }
+    hello();
+    const helloTimer = setTimeout(() => {
+      if (!parentOk) { parentOk = false; /* fallback stays active by default */ }
+    }, 120);
+
+    addEventListener('message', (e) => {
+      const d = e.data || {};
+      if (d.type === 'SPLINE_PARENT_ACK') {
+        parentOk = true; clearTimeout(helloTimer);
       }
-    </script>
-
-    <style>
-      /* Valid units, no spaces */
-      html, body { margin: 0; height: 100%; background: transparent; }
-      #outer  { position: relative; width: 100vw; }
-      #sticky { position: sticky; top: 0; width: 100vw; height: 100svh; }
-
-      /* Force the component to fill the viewport cleanly */
-      spline-viewer{
-        width: 100vw !important;
-        height: 100svh !important;
-        max-width: none !important;
-        min-width: 0 !important;
-        display: block !important;
-        box-sizing: border-box !important;
+      if (d.type === 'SCROLL_RANGE') {
+        rangePx = Math.max(0, +d.rangePx||0);
+        setPageHeight(rangePx + (innerHeight||0));
       }
-      spline-viewer::part(container), spline-viewer::part(canvas){
-        width: 100% !important;
-        height: 100% !important;
-        max-width: none !important;
+      if (d.type === 'SCROLL_PROGRESS') {
+        const max = Math.max(0, document.documentElement.scrollHeight - (innerHeight||0));
+        scrollTo(0, (Math.min(Math.max(+d.progress||0,0),1)) * max);
       }
-    </style>
-  </head>
+    });
 
-  <body>
-    <section id="outer">
-      <div id="sticky">
-        <!-- We will set the URL in script, so we can pick a safe fallback -->
-        <spline-viewer id="viewer" events-target="local"></spline-viewer>
-      </div>
-    </section>
-
-    <script type="module">
-      const qp    = new URLSearchParams(location.search);
-      const outer = document.getElementById('outer');
-      const viewer = document.getElementById('viewer');
-
-      // Pick an existing scene. Tablet → fall back to scene.splinecode.
-      function pickScene(){
-        const mobile = matchMedia('(max-width: 640px)').matches;
-        const tablet = matchMedia('(max-width: 1024px)').matches && !mobile;
-        if (mobile) return './scene-mobile.splinecode';
-        if (tablet) return './scene.splinecode';       // no tablet file in repo
-        return './scene-desktop.splinecode';
-      }
-      viewer.setAttribute('url', pickScene());
-      addEventListener('resize', () => {
-        const next = pickScene();
-        if (viewer.getAttribute('url') !== next) viewer.setAttribute('url', next);
-      });
-
-      // Fallback: set section height so the iframe can scroll internally
-      function applyFallbackHeight(){
-        const px = parseInt(qp.get('scrollpx') || '0', 10);
-        if (px) {
-          outer.style.height = px + 'px';
-        } else {
-          const vh = parseFloat(qp.get('scrollvh') || '170'); // default sticky length
-          const unit = (window.visualViewport?.height || window.innerHeight) / 100;
-          outer.style.height = (vh * unit) + 'px';
-        }
-      }
-      applyFallbackHeight();
-
-      // Parent → child scroll sync (for Framer embed with ?external=1)
-      let rangePx = null;
-      if (qp.get('external') === '1') {
-        addEventListener('message', (e) => {
-          const d = e?.data;
-          if (!d) return;
-
-          if (d.type === 'SCROLL_RANGE' && Number.isFinite(d.rangePx)) {
-            rangePx = Math.max(0, d.rangePx);
-            outer.style.height = (rangePx + window.innerHeight) + 'px';
-          }
-
-          if (d.type === 'SCROLL_PROGRESS' && Number.isFinite(d.progress)) {
-            // Drive this document's scroll, which the Spline viewer listens to
-            const max = Math.max(
-              0,
-              document.documentElement.scrollHeight - window.innerHeight
-            );
-            window.scrollTo(0, d.progress * max);
-          }
-        });
-
-        const reapply = () => {
-          if (rangePx != null) outer.style.height = (rangePx + window.innerHeight) + 'px';
-        };
-        window.visualViewport?.addEventListener('resize', reapply);
-        addEventListener('orientationchange', reapply);
-        addEventListener('resize', reapply);
-      }
-    </script>
-  </body>
+    addEventListener('orientationchange', () => rangePx && setPageHeight(rangePx + (innerHeight||0)));
+    addEventListener('resize', () => rangePx && setPageHeight(rangePx + (innerHeight||0)));
+  </script>
+</body>
 </html>
