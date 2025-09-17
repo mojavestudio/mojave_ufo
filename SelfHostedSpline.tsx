@@ -32,6 +32,8 @@ type Props = {
     mobileHeightVh: number
     tabletHeightVh: number
     desktopHeightVh: number
+    /** Which viewport height unit to use when heightMode === 'vh' */
+    viewportUnit?: "vh" | "svh" | "dvh" | "auto"
 
     /** Performance */
     renderOnDemand: boolean
@@ -72,6 +74,7 @@ export default function SelfHostedSpline(props: Props) {
         mobileHeightVh = 120,
         tabletHeightVh = 150,
         desktopHeightVh = 170,
+        viewportUnit = "svh",
 
         renderOnDemand = true,
         mountWhenInView = true,
@@ -101,20 +104,23 @@ export default function SelfHostedSpline(props: Props) {
     const hostRef = React.useRef<HTMLDivElement | null>(null)
     const appRef = React.useRef<any>(null)
     const lastSize = React.useRef<{ w: number; h: number }>({ w: 0, h: 0 })
-    const [vhUnit, setVhUnit] = React.useState<"svh" | "lvh" | "vh">("vh")
 
+    // Optional JS-managed stable "vh" when viewportUnit === 'auto'
     React.useEffect(() => {
-        try {
-            // pick the most stable unit the browser supports
-            // @ts-ignore
-            const supports = (prop: string, value: string) => !!(window as any)?.CSS?.supports?.(prop, value)
-            if (supports("height", "100svh")) setVhUnit("svh")
-            else if (supports("height", "100lvh")) setVhUnit("lvh")
-            else setVhUnit("vh")
-        } catch {
-            setVhUnit("vh")
+        if (heightMode !== "vh" || viewportUnit !== "auto") return
+        const setVH = () => {
+            const vv: any = (window as any).visualViewport
+            const h = vv?.height ?? window.innerHeight
+            document.documentElement.style.setProperty("--vh", `${h * 0.01}px`)
         }
-    }, [])
+        setVH()
+        window.addEventListener("resize", setVH)
+        ;(window as any).visualViewport?.addEventListener("resize", setVH)
+        return () => {
+            window.removeEventListener("resize", setVH)
+            ;(window as any).visualViewport?.removeEventListener("resize", setVH)
+        }
+    }, [heightMode, viewportUnit])
 
     const [inView, setInView] = React.useState<boolean>(!mountWhenInView)
     const [resolvedUrl, setResolvedUrl] = React.useState<string>("")
@@ -249,8 +255,20 @@ export default function SelfHostedSpline(props: Props) {
         return () => io.disconnect()
     }, [mountWhenInView])
 
-    // Use stable viewport units on mobile (svh/lvh) with vh fallback
-    const heightStr = `${heightForBp}${vhUnit}`
+    // Resolve height string based on selected viewport unit
+    const heightStr = React.useMemo(() => {
+        if (heightMode !== "vh") return "100%"
+        if (viewportUnit === "auto") return `calc(var(--vh, 1vh) * ${heightForBp})`
+        // Validate support; fall back to vh if not supported
+        try {
+            // @ts-ignore
+            const ok = (window as any)?.CSS?.supports?.("height", `100${viewportUnit}`)
+            const unit = ok ? viewportUnit : "vh"
+            return `${heightForBp}${unit}`
+        } catch {
+            return `${heightForBp}vh`
+        }
+    }, [heightMode, viewportUnit, heightForBp])
 
     // Sizing: either fill the Framer frame, or use responsive vh with modern viewport units
     const style: React.CSSProperties =
@@ -388,6 +406,14 @@ addPropertyControls(SelfHostedSpline, {
         optionTitles: ["Fill Frame", "Viewport (vh)"]
         ,
         defaultValue: "vh",
+    },
+    viewportUnit: {
+        type: ControlType.SegmentedEnum,
+        title: "Viewport Unit",
+        options: ["svh", "dvh", "vh", "auto"],
+        optionTitles: ["svh (stable)", "dvh (dynamic)", "vh (legacy)", "auto (JS)"],
+        defaultValue: "svh",
+        hidden: (p) => p.heightMode !== "vh",
     },
     mobileHeightVh: {
         type: ControlType.Number,
