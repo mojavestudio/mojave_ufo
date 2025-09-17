@@ -14,7 +14,7 @@
 <body>
   <!-- place this <style> anywhere in the BODY (not head) -->
   <style>
-    html, body { margin:0; background:transparent }
+    html, body { margin:0; height:100%; background:transparent }
     #outer  { position:relative; width:100vw }
     #sticky { position:sticky; top:0; width:100vw; height:100vh; height:100svh; }
 
@@ -25,12 +25,14 @@
     /* Fill the sticky box pre/post hydration */
     spline-viewer {
       display:block !important;
-      width:100% !important;
-      height:100% !important;
+      width:100vw !important;
+      height:100svh !important;
       max-width:none !important;
       min-width:0 !important;
       box-sizing:border-box !important;
       contain: layout paint;
+      opacity:1 !important;
+      visibility:visible !important;
     }
     spline-viewer::part(container),
     spline-viewer::part(canvas){
@@ -216,6 +218,47 @@
             tryReveal();
           }
         }, 1000);
+      }
+    })();
+  </script>
+  <script type="module">
+    // Bullet-proof fallback: ensure the viewer always receives a valid URL
+    async function pickUrl() {
+      const preferred = (innerWidth < 600)
+        ? "scene-mobile.splinecode"
+        : (innerWidth < 1024)
+          ? "scene-tablet.splinecode"
+          : "scene-desktop.splinecode";
+      const candidates = [
+        preferred,
+        "scene.splinecode",
+        "scene-desktop.splinecode",
+        "scene-tablet.splinecode",
+        "scene-mobile.splinecode",
+      ];
+      for (const p of candidates) {
+        try {
+          const r = await fetch(p, { method: 'HEAD', cache: 'no-store' });
+          if (r.ok) return p;
+        } catch {}
+      }
+      throw new Error('No scene*.splinecode found at repo root');
+    }
+
+    (async () => {
+      const v = document.querySelector('spline-viewer');
+      if (!v) return;
+      // If main script already set a URL, do nothing
+      if (v.getAttribute('url')) return;
+      try {
+        const url = await pickUrl();
+        v.setAttribute('url', url);
+      } catch (err) {
+        console.error('[mojave_ufo] failed to pick scene url', err);
+      } finally {
+        // Make sure it is visible even if other CSS hid it
+        v.style.opacity = '1';
+        v.style.visibility = 'visible';
       }
     })();
   </script>
