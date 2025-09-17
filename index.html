@@ -38,16 +38,11 @@
     })();
     // pick an existing scene; avoid tablet 404
     function pickScene(){
-      const m = matchMedia('(max-width:640px)').matches;
-      const t = matchMedia('(max-width:1024px)').matches && !m;
-      return m ? './scene-mobile.splinecode' : (t ? './scene.splinecode' : './scene-desktop.splinecode');
+      // Only one scene file exists in the repo: scene.splinecode
+      return './scene.splinecode';
     }
     viewer.setAttribute('events-target','global'); // scroll listens to window inside iframe
     viewer.setAttribute('url', pickScene());
-    addEventListener('resize', () => {
-      const next = pickScene();
-      if (viewer.getAttribute('url') !== next) viewer.setAttribute('url', next);
-    });
 
     // --- scrolling logic: handshake + fallback ---
     const outer = document.getElementById('outer') || document.body.appendChild(Object.assign(document.createElement('section'),{id:'outer'}));
