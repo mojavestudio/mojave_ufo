@@ -1,32 +1,29 @@
-// SelfHostedSpline.tsx
 import * as React from "react"
 import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
-// Lazy import to avoid extra Reacts and keep initial render light
+// Keep React as peer; lazy-load Spline
 const Spline = React.lazy(() => import("@splinetool/react-spline"))
 
 type Breakpoint = "mobile" | "tablet" | "desktop"
 
 type Props = {
-  /** e.g. https://mojavestudio.github.io/mojave_ufo/ (must end with / or we'll add it) */
   gitHubBaseUrl: string
-  /** Mobile scene file (≤640px) */
   mobileFileName: string
-  /** Tablet scene file (641px - 1024px) */
   tabletFileName: string
-  /** Desktop scene file (≥1025px) */
   desktopFileName: string
-  /** Optional fallback from Spline Export → Code → React (https://prod.spline.design/.../scene.splinecode) */
   splineProdUrl: string
 
-  /** Aspect ratio */
+  /** Aspect ratio controls */
   aspectPreset: "16:9" | "4:3" | "3:2" | "1:1" | "9:16" | "21:9" | "Custom"
-  aspectCustom: string // "width:height" e.g. "1200:800"
+  aspectCustom: string // e.g. "1200:800" or "1.6"
 
   /** Performance */
   renderOnDemand: boolean
   mountWhenInView: boolean
   preflightCheck: boolean
+
+  /** Behavior */
+  freezeHeightAfterLoad: boolean
 
   /** Optional */
   zoom: number
@@ -35,16 +32,16 @@ type Props = {
 }
 
 function parseAspect(input: string): number {
-  // Accept "w:h", "w / h", "1.7777", etc.
   if (!input) return 16 / 9
-  const cleaned = String(input).replace(/\s/g, "")
-  if (cleaned.includes(":") || cleaned.includes("/")) {
-    const parts = cleaned.split(/[:/]/).map(Number)
-    const [w, h] = parts.length >= 2 ? parts : [16, 9]
-    return !isFinite(w) || !isFinite(h) || h === 0 ? 16 / 9 : w / h
+  const txt = String(input).trim()
+  const m = txt.match(/^(\d+(?:\.\d+)?)[\s:\/]+(\d+(?:\.\d+)?)$/)
+  if (m) {
+    const w = parseFloat(m[1])
+    const h = parseFloat(m[2])
+    return h > 0 ? w / h : 16 / 9
   }
-  const num = Number(cleaned)
-  return isFinite(num) && num > 0 ? num : 16 / 9
+  const num = Number(txt)
+  return Number.isFinite(num) && num > 0 ? num : 16 / 9
 }
 
 export default function SelfHostedSpline(props: Props) {
@@ -62,20 +59,23 @@ export default function SelfHostedSpline(props: Props) {
     mountWhenInView = true,
     preflightCheck = true,
 
+    freezeHeightAfterLoad = true,
+
     zoom = 1,
     fallbackMessage = "Spline scene URL failed to load (404/blocked). Check the path or host.",
     className,
   } = props
 
   const isStatic = useIsStaticRenderer()
-  const outerRef = React.useRef<HTMLDivElement | null>(null)
+  const rootRef = React.useRef<HTMLDivElement | null>(null)
 
+  const [bp, setBp] = React.useState<Breakpoint>("desktop")
   const [inView, setInView] = React.useState<boolean>(!mountWhenInView)
   const [resolvedUrl, setResolvedUrl] = React.useState<string>("")
   const [error, setError] = React.useState<string>("")
+  const [loaded, setLoaded] = React.useState(false)
 
-  // ----- Breakpoints (no reflow flicker; just URL pick) -----
-  const [bp, setBp] = React.useState<Breakpoint>("desktop")
+  // ——— Breakpoints -> which file
   React.useEffect(() => {
     const onResize = () => {
       const w = window.innerWidth
@@ -90,13 +90,13 @@ export default function SelfHostedSpline(props: Props) {
     return bp === "mobile" ? mobileFileName : bp === "tablet" ? tabletFileName : desktopFileName
   }, [bp, mobileFileName, tabletFileName, desktopFileName])
 
-  // ----- Build GH URL -----
+  // ——— Build GH URL
   const ghUrl = React.useMemo(() => {
     const base = (gitHubBaseUrl || "").replace(/\/+$/, "") + "/"
     return base + (sceneFile || "").replace(/^\/+/, "")
   }, [gitHubBaseUrl, sceneFile])
 
-  // ----- Preflight the URL to avoid runtime 404 churn -----
+  // ——— Preflight HEAD/GET to avoid runtime 404 churn
   React.useEffect(() => {
     let cancelled = false
     setError("")
@@ -139,10 +139,10 @@ export default function SelfHostedSpline(props: Props) {
     }
   }, [ghUrl, splineProdUrl, preflightCheck])
 
-  // ----- Mount only when visible (avoid multi-Three scenes) -----
+  // ——— Mount only when visible (avoid multiple WebGLs)
   React.useEffect(() => {
-    if (!mountWhenInView || !outerRef.current) return
-    const node = outerRef.current
+    if (!mountWhenInView || !rootRef.current) return
+    const node = rootRef.current
     const io = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), {
       root: null,
       rootMargin: "200px 0px",
@@ -152,40 +152,36 @@ export default function SelfHostedSpline(props: Props) {
     return () => io.disconnect()
   }, [mountWhenInView])
 
-  // ----- Aspect ratio (height derives from width) -----
-  const ratio =
-    aspectPreset === "Custom" ? parseAspect(aspectCustom) : parseAspect(aspectPreset)
+  // ——— Height = width / aspectRatio   (computed with ResizeObserver)
+  const aspect = aspectPreset === "Custom" ? parseAspect(aspectCustom) : parseAspect(aspectPreset)
+  const [pxHeight, setPxHeight] = React.useState<number>(() => {
+    // initial guess for Framer canvas to avoid a 0→N jump
+    const defaultWidth = (SelfHostedSpline as any).defaultProps?.width ?? 1200
+    return Math.round(defaultWidth / aspect)
+  })
 
-  // Prefer native aspect-ratio; use padding-top fallback if missing
-  const supportsAspect = React.useMemo(
-    () => typeof CSS !== "undefined" && (CSS as any).supports?.("aspect-ratio: 1 / 1"),
-    []
-  )
+  React.useLayoutEffect(() => {
+    const el = rootRef.current
+    if (!el) return
 
-  const wrapperStyle: React.CSSProperties = supportsAspect
-    ? {
-        width: "100%",
-        aspectRatio: `${ratio}`,
-        position: "relative",
-        overflow: "hidden",
+    const ro = new ResizeObserver(entries => {
+      if (freezeHeightAfterLoad && loaded) return // stop reacting after first load if requested
+      const width = entries[0].contentRect.width
+      if (width > 0) {
+        const h = Math.max(1, Math.round(width / aspect))
+        // only update when different to avoid reflows
+        setPxHeight(prev => (Math.abs(prev - h) > 0.5 ? h : prev))
       }
-    : {
-        width: "100%",
-        position: "relative",
-        overflow: "hidden",
-        // padding-top fallback: height = width / ratio  ->  h/w = 1/ratio -> %
-        paddingTop: `${(1 / ratio) * 100}%`,
-      }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [aspect, loaded, freezeHeightAfterLoad])
 
-  const innerStyle: React.CSSProperties = supportsAspect
-    ? { position: "absolute", inset: 0 }
-    : { position: "absolute", inset: 0 }
-
-  // ----- Static canvas (Editor thumbnails / exports) -----
+  // ——— Render
   if (isStatic) {
     return (
-      <div ref={outerRef} className={className} style={wrapperStyle}>
-        <div style={{ ...innerStyle, display: "grid", placeItems: "center", fontSize: 12, opacity: 0.6 }}>
+      <div ref={rootRef} className={className} style={{ width: "100%", height: pxHeight, position: "relative", overflow: "hidden" }}>
+        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 12, opacity: 0.6 }}>
           Spline preview (static)
         </div>
       </div>
@@ -193,74 +189,47 @@ export default function SelfHostedSpline(props: Props) {
   }
 
   return (
-    <div ref={outerRef} className={className} style={wrapperStyle}>
-      <div style={innerStyle}>
-        <React.Suspense fallback={<div style={{ padding: 12 }}>Loading 3D…</div>}>
-          {error ? (
-            <div style={{ padding: 12, fontSize: 14, lineHeight: 1.4 }}>{fallbackMessage}<br />
-              <code style={{ fontSize: 12 }}>{error}</code>
-            </div>
-          ) : inView && resolvedUrl ? (
-            <Spline
-              scene={resolvedUrl}
-              renderOnDemand={renderOnDemand}
-              onLoad={(app) => {
-                try {
-                  if (Number.isFinite(zoom) && zoom > 0) app.setZoom(zoom)
-                } catch {/* ignore */}
-              }}
-              // Let Spline fill the locked box
-              style={{ width: "100%", height: "100%" }}
-            />
-          ) : null}
-        </React.Suspense>
-      </div>
+    <div ref={rootRef} className={className} style={{ width: "100%", height: pxHeight, position: "relative", overflow: "hidden" }}>
+      <React.Suspense fallback={<div style={{ padding: 12 }}>Loading 3D…</div>}>
+        {error ? (
+          <div style={{ padding: 12, fontSize: 14, lineHeight: 1.4 }}>
+            {fallbackMessage}
+            <br />
+            <code style={{ fontSize: 12 }}>{error}</code>
+          </div>
+        ) : inView && resolvedUrl ? (
+          <Spline
+            scene={resolvedUrl}
+            renderOnDemand={renderOnDemand}
+            onLoad={(app) => {
+              try {
+                if (Number.isFinite(zoom) && zoom > 0) app.setZoom(zoom)
+              } catch {}
+              setLoaded(true) // optional: stop height reactions if freezeHeightAfterLoad = true
+            }}
+            style={{ width: "100%", height: "100%" }}
+          />
+        ) : null}
+      </React.Suspense>
     </div>
   )
 }
 
-// ----- Framer Controls -----
+/** Framer Controls */
 addPropertyControls(SelfHostedSpline, {
-  gitHubBaseUrl: {
-    type: ControlType.String,
-    title: "GitHub Base",
-    defaultValue: "https://mojavestudio.github.io/mojave_ufo/",
-    placeholder: "https://<user>.github.io/<project>/",
-  },
-  mobileFileName: {
-    type: ControlType.String,
-    title: "Mobile Scene (≤640px)",
-    defaultValue: "scene-mobile.splinecode",
-  },
-  tabletFileName: {
-    type: ControlType.String,
-    title: "Tablet Scene (641–1024px)",
-    defaultValue: "scene.splinecode",
-  },
-  desktopFileName: {
-    type: ControlType.String,
-    title: "Desktop Scene (≥1025px)",
-    defaultValue: "scene.splinecode",
-  },
-  splineProdUrl: {
-    type: ControlType.String,
-    title: "Spline Fallback",
-    defaultValue: "",
-    placeholder: "https://prod.spline.design/ID/scene.splinecode",
-  },
+  gitHubBaseUrl: { type: ControlType.String, title: "GitHub Base", defaultValue: "https://mojavestudio.github.io/mojave_ufo/" },
+  mobileFileName: { type: ControlType.String, title: "Mobile Scene (≤640px)", defaultValue: "scene-mobile.splinecode" },
+  tabletFileName: { type: ControlType.String, title: "Tablet Scene (641–1024px)", defaultValue: "scene.splinecode" },
+  desktopFileName: { type: ControlType.String, title: "Desktop Scene (≥1025px)", defaultValue: "scene.splinecode" },
+  splineProdUrl: { type: ControlType.String, title: "Spline Fallback", defaultValue: "", placeholder: "https://prod.spline.design/ID/scene.splinecode" },
 
   aspectPreset: {
-    type: ControlType.Enum,
-    title: "Aspect Ratio",
+    type: ControlType.Enum, title: "Aspect Ratio",
     options: ["16:9", "4:3", "3:2", "1:1", "9:16", "21:9", "Custom"],
-    optionTitles: ["16:9", "4:3", "3:2", "1:1", "9:16", "21:9", "Custom"],
     defaultValue: "16:9",
   },
   aspectCustom: {
-    type: ControlType.String,
-    title: "Custom (w:h)",
-    placeholder: "e.g. 1200:800 or 1.5",
-    defaultValue: "16:9",
+    type: ControlType.String, title: "Custom (w:h or number)", defaultValue: "16:9",
     hidden: (p) => p.aspectPreset !== "Custom",
   },
 
@@ -268,21 +237,11 @@ addPropertyControls(SelfHostedSpline, {
   mountWhenInView: { type: ControlType.Boolean, title: "Mount In View", defaultValue: true },
   preflightCheck: { type: ControlType.Boolean, title: "Check URL (HEAD)", defaultValue: true },
 
-  zoom: {
-    type: ControlType.Number,
-    title: "Zoom",
-    min: 0.1, max: 5, step: 0.1, displayStepper: true,
-    defaultValue: 1,
-  },
-  fallbackMessage: {
-    type: ControlType.String,
-    title: "Fallback Message",
-    defaultValue: "Spline scene URL failed to load (404/blocked). Check the path or host.",
-  },
+  freezeHeightAfterLoad: { type: ControlType.Boolean, title: "Freeze Height After Load", defaultValue: true },
+
+  zoom: { type: ControlType.Number, title: "Zoom", min: 0.1, max: 5, step: 0.1, defaultValue: 1 },
+  fallbackMessage: { type: ControlType.String, title: "Fallback Message", defaultValue: "Spline scene URL failed to load (404/blocked). Check the path or host." },
 })
 
-// Help Framer pick an initial size in Canvas (height auto-follows width after first layout)
-;(SelfHostedSpline as any).defaultProps = {
-  width: 1200,
-  height: Math.round(1200 / (16 / 9)),
-}
+// Give Framer a sane initial box; height is derived from width
+;(SelfHostedSpline as any).defaultProps = { width: 1200, height: Math.round(1200 / (16 / 9)) }
