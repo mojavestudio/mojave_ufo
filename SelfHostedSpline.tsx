@@ -41,6 +41,7 @@ export default function SelfHostedSpline({
 
   // Track live box size so we only mount the WebGL once we have real pixels
   const [contentSize, setContentSize] = React.useState({ width: 0, height: 0 })
+  const [resetSignal, setResetSignal] = React.useState(0)
   React.useLayoutEffect(() => {
     if (!hostRef.current) return
     const ro = new ResizeObserver(([entry]) => {
@@ -48,11 +49,12 @@ export default function SelfHostedSpline({
       const { width, height } = entry.contentRect
       const nextWidth = Math.max(0, width)
       const nextHeight = Math.max(0, height)
-      setContentSize((prev) =>
-        prev.width === nextWidth && prev.height === nextHeight
-          ? prev
-          : { width: nextWidth, height: nextHeight }
-      )
+      setContentSize((prev) => {
+        if (prev.width === nextWidth && prev.height === nextHeight) return prev
+        const next = { width: nextWidth, height: nextHeight }
+        setResetSignal((token) => token + 1)
+        return next
+      })
     })
     ro.observe(hostRef.current)
     return () => ro.disconnect()
@@ -184,6 +186,7 @@ export default function SelfHostedSpline({
             removeRenderedListenerRef.current = cleanup
           }}
           showFallback={!error}
+          resetSignal={resetSignal}
         />
       ) : null}
       {!shouldMountSpline && !error ? <div style={{ position: "absolute", inset: 0 }} /> : null}
@@ -202,14 +205,16 @@ type ManagedSplineProps = {
   zoom: number
   onApp: (app: Application, cleanup: () => void) => void
   showFallback: boolean
+  resetSignal: number
 }
 
 const zeroVariableCandidates = ["scroll", "progress", "timeline"]
 
-function ManagedSpline({ scene, renderOnDemand, zoom, onApp, showFallback }: ManagedSplineProps) {
+function ManagedSpline({ scene, renderOnDemand, zoom, onApp, showFallback, resetSignal }: ManagedSplineProps) {
   const [visible, setVisible] = React.useState(false)
   const hideUntilRendered = React.useCallback(() => setVisible(false), [])
   const cleanupRef = React.useRef<(() => void) | null>(null)
+  const appInstanceRef = React.useRef<Application | null>(null)
 
   const resetState = React.useCallback((app: Application) => {
     if (!app) return
@@ -271,6 +276,12 @@ function ManagedSpline({ scene, renderOnDemand, zoom, onApp, showFallback }: Man
     }
   }, [])
 
+  React.useEffect(() => {
+    if (appInstanceRef.current) {
+      resetState(appInstanceRef.current)
+    }
+  }, [resetSignal, resetState])
+
   return (
     <React.Suspense fallback={showFallback ? <div style={{ padding: 12 }}>Loading 3D…</div> : null}>
       <Spline
@@ -328,6 +339,7 @@ function ManagedSpline({ scene, renderOnDemand, zoom, onApp, showFallback }: Man
 
           try { if (Number.isFinite(zoom) && zoom > 0) app.setZoom(zoom) } catch {}
           resetState(app)
+          appInstanceRef.current = app
 
           if (renderOnDemand) {
             const kick = () => {
@@ -349,6 +361,7 @@ function ManagedSpline({ scene, renderOnDemand, zoom, onApp, showFallback }: Man
           onApp(app, () => {
             cleanup()
             cleanupRef.current = null
+            appInstanceRef.current = null
           })
         }}
       />
