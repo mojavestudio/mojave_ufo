@@ -1,137 +1,145 @@
+// SelfHostedSpline.tsx
 import * as React from "react"
-import { addPropertyControls, ControlType } from "framer"
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
-// Simple, stable Spline component that self-sizes and avoids import conflicts
-export default function SelfHostedSpline({
-  gitHubBaseUrl = "https://mojavestudio.github.io/mojave_ufo/",
-  mobileFileName = "scene-mobile.splinecode",
-  desktopFileName = "scene.splinecode",
-  aspectRatio = 16 / 9,
-  zoom = 1,
-  className,
-  style,
-  ...rest
-}: {
-  gitHubBaseUrl?: string
-  mobileFileName?: string
-  desktopFileName?: string
-  aspectRatio?: number
-  zoom?: number
+const Spline = React.lazy(() => import("@splinetool/react-spline"))
+
+type Props = {
+  width?: number
+  height?: number
+  gitHubBaseUrl: string
+  sceneFileName: string
+  splineProdUrl?: string
+  fallbackAspectRatio: number
+  renderOnDemand: boolean
+  mountWhenInView: boolean
+  preflightCheck: boolean
+  zoom: number
+  fallbackMessage: string
   className?: string
-  style?: React.CSSProperties
-}) {
-  const containerRef = React.useRef<HTMLDivElement>(null)
-  const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 })
-  const [isMobile, setIsMobile] = React.useState(false)
+}
 
-  // Measure container and detect mobile
+export default function SelfHostedSpline({
+  width: layoutWidth,
+  height: layoutHeight,
+  gitHubBaseUrl = "https://mojavestudio.github.io/mojave_ufo/",
+  sceneFileName = "scene.splinecode",
+  splineProdUrl = "",
+  fallbackAspectRatio = 16 / 9,
+  renderOnDemand = true,
+  mountWhenInView = true,
+  preflightCheck = true,
+  zoom = 1,
+  fallbackMessage = "Spline scene failed to load.",
+  className,
+}: Props) {
+  const isStatic = useIsStaticRenderer()
+  const hostRef = React.useRef<HTMLDivElement | null>(null)
+
+  const explicitHeight =
+    typeof layoutHeight === "number" && Number.isFinite(layoutHeight) && layoutHeight > 0
+      ? layoutHeight
+      : undefined
+  const explicitWidth =
+    typeof layoutWidth === "number" && Number.isFinite(layoutWidth) && layoutWidth > 0
+      ? layoutWidth
+      : undefined
+
+  const ghUrl = React.useMemo(() => {
+    const base = (gitHubBaseUrl || "").replace(/\/+$/, "") + "/"
+    return base + (sceneFileName || "").replace(/^\/+/, "")
+  }, [gitHubBaseUrl, sceneFileName])
+
+  // preflight choose GH → prod
+  const [resolvedUrl, setResolvedUrl] = React.useState("")
+  const [error, setError] = React.useState("")
   React.useEffect(() => {
-    if (!containerRef.current) return
-
-    const updateSize = () => {
-      if (!containerRef.current) return
-      const rect = containerRef.current.getBoundingClientRect()
-      const mobile = window.innerWidth <= 640
-      setIsMobile(mobile)
-      
-      // Calculate height from width using aspect ratio
-      const width = rect.width
-      const height = width > 0 ? Math.round(width / aspectRatio) : 0
-      
-      setContainerSize({ width, height })
-      
-      // Set the actual DOM height to prevent jumping
-      if (height > 0) {
-        containerRef.current.style.height = `${height}px`
-      }
+    let cancelled = false
+    setError("")
+    setResolvedUrl("")
+    const ok = async (url: string) => {
+      try { const h = await fetch(url, { method: "HEAD", cache: "no-store" }); if (h.ok) return true } catch {}
+      try { const g = await fetch(url, { method: "GET", cache: "no-store" }); return g.ok } catch { return false }
     }
+    ;(async () => {
+      if (!preflightCheck) { setResolvedUrl(ghUrl || splineProdUrl || ""); return }
+      if (ghUrl && (await ok(ghUrl))) { if (!cancelled) setResolvedUrl(ghUrl); return }
+      if (splineProdUrl && (await ok(splineProdUrl))) { if (!cancelled) setResolvedUrl(splineProdUrl); return }
+      if (!cancelled) { setResolvedUrl(ghUrl || splineProdUrl || ""); setError(`Could not load: ${ghUrl || splineProdUrl || "(no url)"}`) }
+    })()
+    return () => { cancelled = true }
+  }, [ghUrl, splineProdUrl, preflightCheck])
 
-    // Initial measurement
-    updateSize()
+  // mount gating (avoid overlapping WebGL)
+  const [inView, setInView] = React.useState<boolean>(!mountWhenInView)
+  React.useEffect(() => {
+    if (!mountWhenInView || !hostRef.current) return
+    const io = new IntersectionObserver(([e]) => setInView(e.isIntersecting), {
+      root: null,
+      rootMargin: "200px 0px",
+      threshold: 0.01,
+    })
+    io.observe(hostRef.current)
+    return () => io.disconnect()
+  }, [mountWhenInView])
 
-    // Listen for changes
-    const ro = new ResizeObserver(updateSize)
-    ro.observe(containerRef.current)
-    window.addEventListener('resize', updateSize)
+  const shouldMountSpline = inView && !!resolvedUrl && !error
 
-    return () => {
-      ro.disconnect()
-      window.removeEventListener('resize', updateSize)
-    }
-  }, [aspectRatio])
+  const hostStyle: React.CSSProperties = {
+    width: explicitWidth ?? "100%",
+    height: explicitHeight ?? undefined,
+    aspectRatio: explicitHeight == null && fallbackAspectRatio > 0 ? `${fallbackAspectRatio}` : undefined,
+    position: "relative",
+    overflow: "hidden",
+    contain: "layout style paint",
+  }
 
-  // Build scene URL
-  const sceneFile = isMobile ? mobileFileName : desktopFileName
-  const sceneUrl = React.useMemo(() => {
-    const base = gitHubBaseUrl.replace(/\/+$/, "") + "/"
-    return base + sceneFile.replace(/^\/+/, "")
-  }, [gitHubBaseUrl, sceneFile])
-
-  // Only render when we have a stable size
-  const canRender = containerSize.width > 0 && containerSize.height > 0
+  // static/canvas: reserve space via aspect-ratio to avoid 0→N jump
+  if (isStatic) {
+    return (
+      <div
+        ref={hostRef}
+        className={className}
+        style={hostStyle}
+      />
+    )
+  }
 
   return (
     <div
-      ref={containerRef}
+      ref={hostRef}
       className={className}
-      style={{
-        width: "100%",
-        aspectRatio: aspectRatio,
-        position: "relative",
-        overflow: "hidden",
-        ...style,
-      }}
-      {...rest}
+      style={hostStyle}
     >
-      {canRender && (
-        <iframe
-          src={sceneUrl}
-          style={{
-            width: "100%",
-            height: "100%",
-            border: 0,
-            position: "absolute",
-            top: 0,
-            left: 0,
-          }}
-          allow="fullscreen; autoplay; xr-spatial-tracking"
-          loading="lazy"
-        />
-      )}
+      {shouldMountSpline ? (
+        <React.Suspense fallback={<div style={{ padding: 12 }}>Loading 3D…</div>}>
+          <Spline
+            scene={resolvedUrl}
+            renderOnDemand={renderOnDemand}
+            style={{ width: "100%", height: "100%", display: "block", position: "absolute", inset: 0 }}
+            onLoad={(app) => {
+              try { if (Number.isFinite(zoom) && zoom > 0) app.setZoom(zoom) } catch {}
+            }}
+          />
+        </React.Suspense>
+      ) : null}
+      {!shouldMountSpline && !error ? <div style={{ position: "absolute", inset: 0 }} /> : null}
+      {error ? (
+        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: 12 }}>
+          <span>{fallbackMessage}</span>
+        </div>
+      ) : null}
     </div>
   )
 }
 
 addPropertyControls(SelfHostedSpline, {
-  gitHubBaseUrl: {
-    type: ControlType.String,
-    title: "GitHub Base URL",
-    defaultValue: "https://mojavestudio.github.io/mojave_ufo/",
-  },
-  mobileFileName: {
-    type: ControlType.String,
-    title: "Mobile Scene",
-    defaultValue: "scene-mobile.splinecode",
-  },
-  desktopFileName: {
-    type: ControlType.String,
-    title: "Desktop Scene", 
-    defaultValue: "scene.splinecode",
-  },
-  aspectRatio: {
-    type: ControlType.Number,
-    title: "Aspect Ratio (W/H)",
-    defaultValue: 16 / 9,
-    min: 0.1,
-    max: 10,
-    step: 0.1,
-  },
-  zoom: {
-    type: ControlType.Number,
-    title: "Zoom",
-    defaultValue: 1,
-    min: 0.1,
-    max: 5,
-    step: 0.1,
-  },
+  gitHubBaseUrl: { type: ControlType.String, title: "GitHub Base", defaultValue: "https://mojavestudio.github.io/mojave_ufo/" },
+  sceneFileName: { type: ControlType.String, title: "Scene File", defaultValue: "scene.splinecode" },
+  fallbackAspectRatio: { type: ControlType.Number, title: "Fallback Ratio", defaultValue: 16 / 9, step: 0.01, min: 0.2, max: 5, displayStepper: true },
+  renderOnDemand: { type: ControlType.Boolean, title: "Render On Demand", defaultValue: true },
+  mountWhenInView: { type: ControlType.Boolean, title: "Mount In View", defaultValue: true },
+  preflightCheck: { type: ControlType.Boolean, title: "Check URL (HEAD)", defaultValue: true },
+  zoom: { type: ControlType.Number, title: "Zoom", min: 0.1, max: 5, step: 0.1, displayStepper: true, defaultValue: 1 },
+  fallbackMessage: { type: ControlType.String, title: "Fallback Message", defaultValue: "Spline scene failed to load." },
 })
