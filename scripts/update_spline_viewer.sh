@@ -3,9 +3,9 @@ set -euo pipefail
 
 # Update the vendored @splinetool/viewer build files to a pinned version.
 # Usage: ./scripts/update_spline_viewer.sh [version]
-# Example: ./scripts/update_spline_viewer.sh 1.10.57
+# Example: ./scripts/update_spline_viewer.sh 1.10.73
 
-VER="${1:-1.10.57}"
+VER="${1:-1.10.73}"
 BASE_URL="https://unpkg.com/@splinetool/viewer@${VER}/build"
 DEST="vendor/spline-viewer/build"
 

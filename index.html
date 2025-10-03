@@ -9,9 +9,20 @@
   <title>Mojave UFO</title>
 
   <!-- put this in <head> once; keep it exactly like this -->
+  <link rel="modulepreload" href="https://unpkg.com/@splinetool/viewer@1.10.73/build/spline-viewer.js" crossorigin>
   <script type="module">
+    const VIEWER_VERSION = '1.10.73';
+    const CDN_SRC = `https://unpkg.com/@splinetool/viewer@${VIEWER_VERSION}/build/spline-viewer.js`;
+    const LOCAL_SRC = './vendor/spline-viewer/build/spline-viewer.js';
     if (!customElements.get('spline-viewer')) {
-      import('./vendor/spline-viewer/build/spline-viewer.js');
+      (async () => {
+        try {
+          await import(CDN_SRC);
+        } catch (err) {
+          console.warn('[MojaveUFO] CDN viewer import failed, falling back to local bundle.', err);
+          await import(LOCAL_SRC);
+        }
+      })();
     }
   </script>
 
@@ -28,6 +39,15 @@
     <div id="sticky">
       <spline-viewer id="viewer" events-target="global"></spline-viewer>
     </div>
+
+    <!-- Test viewport animation with scroll trigger -->
+    <div style="height: 200vh; background: linear-gradient(45deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-family: Arial, sans-serif;">
+      <div style="text-align: center; padding: 2rem;">
+        <h1>Scroll down to test viewport animation</h1>
+        <p>The 3D globe above should animate when it enters your viewport</p>
+        <p>Look for the console log: "[MojaveGlobe] Component entered viewport - starting animation"</p>
+      </div>
+    </div>
   </section>
 
   <!-- put this just before </body> -->
@@ -36,16 +56,15 @@
     const viewer = document.querySelector('spline-viewer') || (() => {
       const v = document.createElement('spline-viewer'); v.setAttribute('events-target','global'); return document.body.appendChild(v);
     })();
-    // pick an existing scene; avoid tablet 404
+    // Scenes default to the main export; optional query params override per breakpoint.
+    const defaultScene = qp.get('scene') || './scene.splinecode';
+    const tabletScene = qp.get('sceneTablet') || qp.get('scene-tablet') || defaultScene;
+    const mobileScene = qp.get('sceneMobile') || qp.get('scene-mobile') || defaultScene;
     function pickScene(){
-      const width = window.innerWidth;
-      if (width <= 640) {
-        return './scene-mobile.splinecode';  // Mobile: ≤640px
-      } else if (width <= 1024) {
-        return './scene.splinecode';         // Tablet: 641-1024px
-      } else {
-        return './scene.splinecode';         // Desktop: ≥1025px
-      }
+      const width = window.innerWidth || screen.width || 0;
+      if (width > 0 && width <= 640) return mobileScene;
+      if (width > 0 && width <= 1024) return tabletScene;
+      return defaultScene;
     }
     viewer.setAttribute('events-target','global'); // scroll listens to window inside iframe
     viewer.setAttribute('url', pickScene());

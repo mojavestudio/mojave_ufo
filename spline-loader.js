@@ -10,7 +10,7 @@
   if (!g.__SPLINE__) g.__SPLINE__ = {}
   const state = g.__SPLINE__
 
-  export async function loadSplineViewer(version = "1.10.53") {
+  export async function loadSplineViewer(version = "1.10.73") {
     if (typeof window === "undefined") return
 
     // If already defined, we’re done.

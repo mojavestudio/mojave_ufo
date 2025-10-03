@@ -1,252 +1,51 @@
-# Mojave UFO — Static Spline Scene
+# Mojave UFO
 
-Minimal static setup to host a Spline scene on GitHub Pages and embed it in Framer while preserving scroll-triggered animation (authored in Spline).
+This folder bundles two pieces that work together inside our Mojave UFO concept:
 
-Keep these files at the repo root:
-- `index.html`
-- `scene.splinecode`
-- `process.js`
-- `process.wasm`
-- `.nojekyll`
-- Vendored viewer: `vendor/spline-viewer/build/*` (pinned)
+- **MojaveGlobe.tsx** – a Framer code component backed by globe.gl + Three.js.
+- **index.html + Spline assets** – a static viewer that can be hosted (for example on GitHub Pages) and embedded in Framer.
 
-## GitHub Pages + Framer Embed
+## MojaveGlobe (Framer code component)
 
-This repo can also serve a standalone Spline scene via GitHub Pages and be embedded in Framer as a Code Component while preserving scroll-triggered animations authored in Spline.
+Interactive globe that loads its libraries on demand, aligns camera framing with padding, and can route between cities using geocoding.
 
-### 1) Prepare files (repo root)
-- Add the following files from your Spline export to the repo root:
-  - `scene.splinecode`
-  - `process.js`
-  - `process.wasm`
-- An `index.html` is already included at the repo root and references `./scene.splinecode` using the Spline Viewer web component.
+### Highlights
+- Single-shot loader caches globe.gl + Three.js between component instances.
+- Responsive sizing: globe radius, DPR, and camera altitude adjust whenever the frame or padding changes.
+- Scroll-driven motion modes (`Rotate`, `Spin (Page Scroll)`, and the route presets) that respect viewport entry before animating.
+- Marker system with geocoding fallback (OpenCage → Open-Meteo → curated city list) and memoised results during a session.
+- Pin geometry rendered with Three.js, supporting four styles, custom scale, colours, and altitude offsets.
 
-`index.html` content (fluid + sticky, ready for Framer embed):
+### Drop it into Framer
+1. Create a new **Code File** and paste the contents of `MojaveGlobe.tsx`.
+2. If you have your own OpenCage key, paste it into the *OpenCage Key* control; otherwise the built-in key is rate-limited to light testing.
+3. Add the component to a frame and tweak the properties panel. All controls in `addPropertyControls` are documented inline.
+4. Set `Markers` to the cities you care about. The component geocodes on first mount and caches coordinates while the tab is open.
 
-```html
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
-    <title>Mojave UFO</title>
-    <!-- Load the Spline Viewer web component (self-hosted, pinned) -->
-    <script type="module" src="./vendor/spline-viewer/build/spline-viewer.js"></script>
-    <style>
-      html, body { margin: 0; height: 100%; background: transparent; }
+### Key props worth noting
+- `fitPaddingPx` – matches Framer padding. The component now recomputes camera altitude each time you change it, so animating the slider will visually resize the globe without lingering "hydrated" states.
+- `renderScale` – multiplies the device pixel ratio (capped at 3). Higher values sharpen at the cost of GPU time.
+- `movement` & `scrollSpinDegPer1000px` – pick how the globe reacts to scroll or rotation.
+- `startLocation`/`endLocation` – human-readable names (city or marker label) that resolve to coordinates through the cached geocoder.
+- `markers` – array of per-city settings for geometry, colours, and altitude tweaks.
 
-      /* Viewport-sized, not parent-sized */
-      #outer  { position: relative; width: 100vw; }
-      #sticky { position: sticky; top: 0; width: 100vw; height: 100svh; }
+### Development notes
+- Helper utilities (`computeFitAltitude`, `computePixelRatio`, `ensureMinAltitude`) centralise the sizing math so padding or DPR changes use the same logic everywhere.
+- `renderScale` is normalised once with `normalizeRenderScale` and reused inside effects to avoid recomputing the same clamps.
+- Library loading is idempotent across component instances via a global cache key.
 
-      /* Kill any max-width on the web component and force it fluid */
-      spline-viewer{
-        width:100vw !important;
-        height:100svh !important;
-        max-width:none !important;
-        min-width:0 !important;
-        display:block !important;
-        box-sizing:border-box !important;
-      }
-      /* If your viewer build exposes parts, keep them fluid too (harmless if not) */
-      spline-viewer::part(container),
-      spline-viewer::part(canvas){
-        width:100% !important;
-        height:100% !important;
-        max-width:none !important;
-      }
-    </style>
-  </head>
-  <body>
-    <section id="outer">
-      <div id="sticky">
-        <spline-viewer id="viewer" url="./scene.splinecode" events-target="local"></spline-viewer>
-      </div>
-    </section>
+## Static Spline host (optional)
 
-    <!-- Scroll sync & fallback sizing -->
-    <script type="module">
-      const qp    = new URLSearchParams(location.search)
-      const outer = document.getElementById('outer')
+The bundled `index.html`, `scene.splinecode`, `process.js`, `process.wasm`, and `vendor/` folder let you self-host a Spline scene.
 
-      function applyFallbackHeight(){
-        const px = parseInt(qp.get('scrollpx') || '0', 10)
-        if (px) {
-          outer.style.height = px + 'px'
-        } else {
-          const vh = parseFloat(qp.get('scrollvh') || '170') // harmless default
-          const unit = (window.visualViewport?.height || window.innerHeight) / 100
-          outer.style.height = (vh * unit) + 'px'
-        }
-      }
-      applyFallbackHeight()
+### Deploying quickly
+1. Export your scene from Spline and replace the matching files in this folder.
+2. Commit everything and push to a Git provider (GitHub Pages works out of the box).
+3. Point the `url` attribute in `index.html` (or via query params) at the correct `.splinecode` file.
 
-      let rangePx = null
+### Embedding inside Framer
+- Drop the hosted URL in an `<iframe>` or use Framer's Spline component.
+- The page listens for parent `postMessage` events (`SCROLL_RANGE`, `SCROLL_PROGRESS`) so you can sync scroll if needed.
+- Without a parent messenger, it falls back to an internally managed sticky scroll experience.
 
-      // Parent → child sync (when embedded with ?external=1)
-      if (qp.get('external') === '1') {
-        window.addEventListener('message', (e) => {
-          const d = e?.data
-          if (!d) return
-          if (d.type === 'SCROLL_RANGE' && Number.isFinite(d.rangePx)) {
-            rangePx = Math.max(0, d.rangePx)
-            outer.style.height = (rangePx + window.innerHeight) + 'px'
-          }
-          if (d.type === 'SCROLL_PROGRESS' && Number.isFinite(d.progress)) {
-            const max = document.documentElement.scrollHeight - window.innerHeight
-            document.documentElement.scrollTop = d.progress * Math.max(0, max)
-          }
-        })
-
-        const reapply = () => {
-          if (rangePx != null) outer.style.height = (rangePx + window.innerHeight) + 'px'
-        }
-        window.visualViewport?.addEventListener('resize', reapply)
-        window.addEventListener('orientationchange', reapply)
-        window.addEventListener('resize', reapply)
-      }
-    </script>
-  </body>
-  </html>
-```
-
-> Tip: `.nojekyll` prevents Jekyll from interfering with static assets (helps with `.wasm`).
-
-### 2) Create GitHub repo and push
-- Create a new GitHub repository and push this folder.
-- Ensure `index.html`, `scene.splinecode`, `process.js`, and `process.wasm` live at the root of the repository (not nested in subfolders).
-
-### 3) Enable GitHub Pages
-- Repo Settings → Pages
-- Source: `main` branch, folder: `/` (root)
-- Save. The site will deploy at `https://<username>.github.io/<repo>/`
-
-### 4) Verify
-- Open `https://<username>.github.io/<repo>/` (should render `index.html`)
-- Open `https://<username>.github.io/<repo>/scene.splinecode` (should download or display raw scene)
-
-### 5) Framer Code Component
-Create a new Code File in your Framer project and paste:
-
-```tsx
-import { useEffect, useRef } from "react"
-import { addPropertyControls, ControlType } from "framer"
-
-export default function SplineViewer({
-  url = "https://<username>.github.io/<repo>/scene.splinecode",
-  className,
-  style,
-}: {
-  url?: string
-  className?: string
-  style?: React.CSSProperties
-}) {
-  const loadedRef = useRef(false)
-
-  useEffect(() => {
-    const scriptId = "spline-viewer@1.10.53"
-    if (!document.getElementById(scriptId)) {
-      const s = document.createElement("script")
-      s.id = scriptId
-      s.type = "module"
-      s.src = "https://unpkg.com/@splinetool/viewer@1.10.53/build/spline-viewer.js"
-      document.head.appendChild(s)
-    }
-    loadedRef.current = true
-  }, [])
-
-  return (
-    <div className={className} style={{ width: "100%", height: "100%", ...style }}>
-      {/* @ts-ignore */}
-      <spline-viewer url={url} style={{ width: "100%", height: "100%" }} />
-    </div>
-  )
-}
-
-addPropertyControls(SplineViewer, {
-  url: { type: ControlType.String, title: "Scene URL" },
-})
-```
-
-Usage in Framer:
-- Drag the `SplineViewer` component onto a page.
-- Size it (commonly 100% width, 100vh height).
-- In the right panel, set the `Scene URL` to your GitHub Pages `scene.splinecode` URL.
-
-### Notes
-- Scroll animation must be authored in Spline (Scroll Event or timeline). Framer is just rendering the scene.
-- GitHub Pages is free; no paid hosting required.
-- You can extend the component with more Property Controls later (e.g., background, sticky height).
-
-### Framer parent CSS (full‑bleed embed)
-In Framer Project Settings → Code → Head (start), add:
-
-```html
-<style>
-  /* Target only this repo's embed */
-  iframe[src*="mojavestudio.github.io/mojave_ufo"]{
-    width:100vw !important;
-    max-width:100vw !important;
-    min-width:100vw !important;
-    height:100svh !important;
-    display:block !important;
-    position:relative !important;
-    left:50% !important;
-    transform:translateX(-50%) !important;
-  }
-  .framer-embed-wrapper, .framer-embed-wrapper * { overflow: visible !important; }
-  /* Optional: wrap the Embed in a frame sized to 100vw x 100svh with X: calc(50% - 50vw), Clip OFF */
- </style>
-```
-
-Embed URL example:
-```
-https://mojavestudio.github.io/mojave_ufo/?external=1&v=7
-```
-
-### Quick verification
-- In the parent page console, check the iframe spans the viewport:
-  ```js
-  const r = document.querySelector('iframe[src*="mojavestudio.github.io/mojave_ufo"]').getBoundingClientRect();
-  ({ iframeWidth: r.width, viewport: innerWidth })
-  ```
-- In the iframe tab console, check the web component width equals the viewport:
-  ```js
-  ({ innerWidth, cssWidth: getComputedStyle(document.querySelector('spline-viewer')).width })
-  ```
-
-### Troubleshooting
-- If `process.wasm` fails to load, ensure it’s at the repo root and served with `application/wasm` (GitHub Pages usually handles this automatically).
-- If assets 404, check filename casing and that Pages is serving from the root.
-- If changes don’t appear, hard refresh or disable cache.
-
-### Local preview (static)
-You can quickly preview the static `index.html` locally:
-
-```bash
-npx serve -p 3000 .
-# then open http://localhost:3000/
-```
-
-## Publish with GitHub Desktop
-- Open GitHub Desktop → File → Add Local Repository → choose this folder.
-- Commit all files with a message like "Initial static Spline scene".
-- Click "Publish repository" to push to GitHub (keep default branch `main`).
-- On GitHub: Repo Settings → Pages → Source: Deploy from branch → `main` and `/ (root)`.
-- Wait 1–2 minutes, then open:
-  - `https://<username>.github.io/<repo>/`
-  - `https://<username>.github.io/<repo>/scene.splinecode`
-
-## Pinned Viewer (self-hosted)
-
-This repo vendors the Spline Viewer so everything serves from GitHub Pages without hitting a CDN. The currently pinned version is `1.10.57` under `vendor/spline-viewer/build`.
-
-- Update the pinned version:
-
-```bash
-./scripts/update_spline_viewer.sh 1.10.57
-```
-
-Notes:
-- The viewer’s `process.js` looks for `process.wasm` in the same folder. Some published versions don’t include it under `/build`. The script falls back to copying the local `./process.wasm` into `vendor/spline-viewer/build/`.
-- `index.html` already points to `./vendor/spline-viewer/build/spline-viewer.js`.
+Feel free to strip the Spline portion if you only need the globe – everything is self-contained per file and documented above.
